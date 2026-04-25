@@ -1,0 +1,48 @@
+/data/
+/.sisyphus/evidence/
+/.bin/
+/.docker/
+/.tools/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Local env/config
+.env
+.env.*
+!.env.example
+*.local
+
+# AI/model/cache artifacts
+.cache/
+cache/
+models/
+weights/
+huggingface/
+hf_home/
+torch_cache/
+transformers_cache/
+
+# Media/generated outputs
+*.mp4
+*.wav
+*.srt
+*.ass
+*.vtt
+*.log
