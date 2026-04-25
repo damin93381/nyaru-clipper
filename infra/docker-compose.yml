@@ -1,0 +1,82 @@
+name: bilibili-vtuber-suite
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8000"
+      APP_DATA_DIR: /data
+      APP_BILIBILI_COOKIE_PATH: ${APP_BILIBILI_COOKIE_PATH:-}
+      APP_WHISPERX_MODEL_CACHE_DIR: /models/whisperx
+      HF_HOME: /models/hf
+      TRANSFORMERS_CACHE: /models/hf
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
+    ports:
+      - "${API_BIND_ADDRESS:-0.0.0.0}:8000:8000"
+    volumes:
+      # Task artifacts, SQLite state, and model caches stay under the repo-local data/ tree and stay out of Git.
+      - ../data:/data
+      - ../data/model-cache:/models
+    working_dir: /app
+    command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    gpus:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      APP_DATA_DIR: /data
+      APP_BILIBILI_COOKIE_PATH: ${APP_BILIBILI_COOKIE_PATH:-}
+      APP_WHISPERX_MODEL_CACHE_DIR: /models/whisperx
+      HF_HOME: /models/hf
+      TRANSFORMERS_CACHE: /models/hf
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
+    volumes:
+      - ../data:/data
+      - ../data/model-cache:/models
+    working_dir: /app
+    command: ["uv", "run", "python", "-c", "from app.worker import worker_loop; worker_loop()"]
+    gpus:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+    environment:
+      VITE_HOST: 0.0.0.0
+      VITE_PORT: "5173"
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://127.0.0.1:8000/api}
+    ports:
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    working_dir: /app
+    command: ["pnpm", "dev", "--host", "0.0.0.0", "--port", "5173"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
