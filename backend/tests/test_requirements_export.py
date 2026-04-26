@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPORT_SCRIPT = REPO_ROOT / "scripts" / "export_backend_requirements.sh"
+CUDA_PROFILE_PATH = REPO_ROOT / "backend" / "requirements-linux-cuda.txt"
+WSL_ROCM_PROFILE_PATH = REPO_ROOT / "backend" / "requirements-wsl-rocm.txt"
+
+ACCELERATOR_PACKAGE_NAMES = {
+    "ctranslate2",
+    "faster-whisper",
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "whisperx",
+}
+ACCELERATOR_PACKAGE_PREFIXES = ("nvidia-",)
+PACKAGE_NAME_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
 def _run_export(*args: str) -> subprocess.CompletedProcess[str]:
@@ -18,7 +32,41 @@ def _run_export(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_export_script_generates_repo_root_installable_local_package_reference(tmp_path) -> None:
+def _read_requirement_entries(path: Path) -> list[str]:
+    return [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#") and not line.startswith("--")
+    ]
+
+
+def _package_names(lines: list[str]) -> set[str]:
+    package_names: set[str] = set()
+    for line in lines:
+        match = PACKAGE_NAME_PATTERN.match(line)
+        if match is None:
+            continue
+        package_name = match.group(1)
+        if package_name.startswith((".", "/")):
+            continue
+        package_names.add(package_name.lower())
+    return package_names
+
+
+def _package_versions(lines: list[str]) -> dict[str, str]:
+    package_versions: dict[str, str] = {}
+    for line in lines:
+        match = PACKAGE_NAME_PATTERN.match(line)
+        if match is None:
+            continue
+        package_name = match.group(1).lower()
+        if package_name.startswith((".", "/")) or "==" not in line:
+            continue
+        package_versions[package_name] = line.strip()
+    return package_versions
+
+
+def test_export_script_generates_accelerator_neutral_repo_root_installable_requirements(tmp_path) -> None:
     output_path = tmp_path / "requirements.txt"
 
     result = _run_export("--output", str(output_path))
@@ -27,10 +75,13 @@ def test_export_script_generates_repo_root_installable_local_package_reference(t
     assert output_path.exists()
 
     lines = output_path.read_text(encoding="utf-8").splitlines()
+    package_names = _package_names(lines)
 
     assert "./backend" in lines
     assert "." not in lines
     assert "-e ." not in lines
+    assert package_names.isdisjoint(ACCELERATOR_PACKAGE_NAMES)
+    assert not any(name.startswith(ACCELERATOR_PACKAGE_PREFIXES) for name in package_names)
 
 
 def test_export_script_check_detects_stale_requirements_file(tmp_path) -> None:
@@ -48,3 +99,43 @@ def test_export_script_check_detects_stale_requirements_file(tmp_path) -> None:
 
     assert stale_result.returncode == 1
     assert "stale" in (stale_result.stderr or stale_result.stdout).lower()
+
+
+def test_checked_in_linux_cuda_profile_artifact_contains_cuda_runtime_requirements() -> None:
+    assert CUDA_PROFILE_PATH.exists(), f"missing profile artifact: {CUDA_PROFILE_PATH}"
+
+    lines = _read_requirement_entries(CUDA_PROFILE_PATH)
+    package_names = _package_names(lines)
+
+    assert "torch" in package_names
+    assert "whisperx" in package_names
+    assert any(name.startswith(ACCELERATOR_PACKAGE_PREFIXES) for name in package_names)
+    assert not any("rocm" in line.lower() for line in lines)
+
+
+def test_checked_in_wsl_rocm_profile_artifact_contains_rocm_torch_without_nvidia_packages() -> None:
+    assert WSL_ROCM_PROFILE_PATH.exists(), f"missing profile artifact: {WSL_ROCM_PROFILE_PATH}"
+
+    lines = _read_requirement_entries(WSL_ROCM_PROFILE_PATH)
+    package_names = _package_names(lines)
+
+    assert "torch" in package_names
+    assert "whisperx" in package_names
+    assert any("rocm" in line.lower() for line in lines)
+    assert not any(name.startswith(ACCELERATOR_PACKAGE_PREFIXES) for name in package_names)
+
+
+def test_profile_artifacts_keep_shared_dependency_pins_consistent_with_base_artifact() -> None:
+    base_versions = _package_versions(_read_requirement_entries(REPO_ROOT / "backend" / "requirements.txt"))
+
+    for profile_path in (CUDA_PROFILE_PATH, WSL_ROCM_PROFILE_PATH):
+        profile_versions = _package_versions(_read_requirement_entries(profile_path))
+        conflicting_pins = {
+            package_name: (base_versions[package_name], profile_versions[package_name])
+            for package_name in sorted(base_versions.keys() & profile_versions.keys())
+            if base_versions[package_name] != profile_versions[package_name]
+        }
+
+        assert conflicting_pins == {}, (
+            f"shared dependencies diverged between {profile_path.name} and requirements.txt: {conflicting_pins}"
+        )
