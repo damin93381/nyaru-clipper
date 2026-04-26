@@ -2,7 +2,7 @@
 
 当前项目仍处于测试阶段，基于 OMO Agent 工作流，由 GPT-5.4 全程构建。
 
-项目文档与手册已整理在 docs/ 目录下，欢迎继续改进与完善。
+项目文档与手册已整理在 `docs/` 目录下，欢迎继续改进与完善。
 
 一个面向局域网单机环境的 Bilibili 录播处理工作台，用于下载已结束录播、生成字幕、完成中日双语翻译、提出热点候选片段，并在 WebUI 中人工确认后导出切片。
 
@@ -12,11 +12,14 @@
 - 仅面向**可信内网 / 单机 GPU** 场景
 - 当前仍是 **MVP / 测试阶段**
 
-完整文档见 `docs/`：
+优先阅读以下文档：
 
-- `docs/user-manual.md`
-- `docs/operator-manual.md`
-- `docs/README.zh-CN.md`
+- `docs/deployment-guide.md`：English deployment guide, recommends `uv + pnpm` as the primary local and self-hosted workflow
+- `docs/deployment-guide.zh-CN.md`：中文部署指南，明确 `uv + pnpm` 为主路径，Docker 仅作为回退方案
+- `docs/operator-manual.md`：English operator manual
+- `docs/operator-manual.zh-CN.md`：中文运维手册
+- `docs/README.md`：English documentation index
+- `docs/README.zh-CN.md`：中文文档索引
 
 ## 主要依赖的开源组件
 
