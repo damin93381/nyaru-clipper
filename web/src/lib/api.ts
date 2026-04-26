@@ -3,6 +3,7 @@ import type {
   ClipExportPayload,
   ClipExportResponse,
   CreateTaskPayload,
+  RuntimeCapabilities,
   StageLogSummary,
   TaskDetail,
   TaskStageRecord,
@@ -88,6 +89,10 @@ export function exportTaskClip(taskId: string, payload: ClipExportPayload): Prom
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function getRuntimeCapabilities(): Promise<RuntimeCapabilities> {
+  return request<RuntimeCapabilities>("/runtime/capabilities");
 }
 
 export async function fetchArtifactJson<T>(path: string): Promise<T> {

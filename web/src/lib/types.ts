@@ -97,6 +97,61 @@ export interface ClipExportResponse {
   artifact_id: number;
 }
 
+export type RuntimeCapabilityStatus = "ok" | "warning" | "error";
+
+export interface RuntimeCapabilityPlatform {
+  is_wsl: boolean;
+  machine: string;
+  release: string;
+  system: string;
+  version: string;
+}
+
+export interface RuntimeCapabilityAccelerator {
+  available: boolean;
+  backend: string;
+  cuda_version: string | null;
+  device_count: number;
+  hip_version: string | null;
+  kind: string;
+  torch_available: boolean;
+  torch_version: string | null;
+}
+
+export interface RuntimeDependencyCheck {
+  available: boolean;
+  status: string;
+  binary?: string;
+  module?: string;
+  path?: string | null;
+  version?: string | null;
+}
+
+export interface RuntimeCapabilities {
+  status: RuntimeCapabilityStatus;
+  detected_profile: string;
+  platform: RuntimeCapabilityPlatform;
+  accelerator: RuntimeCapabilityAccelerator;
+  dependencies: {
+    tools: Record<string, RuntimeDependencyCheck>;
+    python: Record<string, RuntimeDependencyCheck>;
+  };
+  warnings: string[];
+}
+
+export const FULL_FUNCTION_RUNTIME_PROFILES = ["linux-cuda", "wsl-rocm"] as const;
+
+export function satisfiesFullFunctionProfile(
+  capabilities: Pick<RuntimeCapabilities, "status" | "detected_profile">,
+): boolean {
+  return (
+    capabilities.status === "ok" &&
+    FULL_FUNCTION_RUNTIME_PROFILES.includes(
+      capabilities.detected_profile as (typeof FULL_FUNCTION_RUNTIME_PROFILES)[number],
+    )
+  );
+}
+
 export function isTerminalStatus(status: TaskStatus | null | undefined): boolean {
   return Boolean(status && TERMINAL_STATUSES.includes(status as (typeof TERMINAL_STATUSES)[number]));
 }
