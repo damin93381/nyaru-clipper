@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -8,6 +9,9 @@ from sqlmodel import select
 
 from app.db import session_scope
 from app.models import Task, TaskJob, TaskStage, utc_now
+from app.services import capability_checks
+from app.services.pipeline_support import append_stage_log
+from app.services.storage import log_file_for_stage
 from app.services.task_runner import run_task_pipeline
 
 
@@ -15,6 +19,28 @@ from app.services.task_runner import run_task_pipeline
 class ClaimedJob:
     task_id: str
     stage_name: str
+
+
+def _build_preflight_warning_summary(capabilities: dict[str, object]) -> str | None:
+    warnings = capabilities.get("warnings")
+    if not isinstance(warnings, list) or not warnings:
+        return None
+
+    summary_payload = {
+        "detected_profile": capabilities.get("detected_profile"),
+        "status": capabilities.get("status"),
+        "warnings": warnings,
+    }
+    return f"worker_preflight_warning={json.dumps(summary_payload, ensure_ascii=False, sort_keys=True)}"
+
+
+def _surface_preflight_warning(task_id: str, stage_name: str) -> str | None:
+    summary = _build_preflight_warning_summary(capability_checks.get_runtime_capabilities())
+    if summary is None:
+        return None
+
+    append_stage_log(log_file_for_stage(task_id, stage_name), summary)
+    return summary
 
 
 def claim_next_job() -> ClaimedJob | None:
@@ -89,13 +115,18 @@ def run_worker_iteration(processor: Callable[[ClaimedJob], bool] | None = None) 
     if claimed_job is None:
         return None
     if processor is None:
+        preflight_warning = _surface_preflight_warning(claimed_job.task_id, claimed_job.stage_name)
         with session_scope() as session:
-            run_task_pipeline(
-                session,
-                claimed_job.task_id,
-                start_stage_name=claimed_job.stage_name,
-                claimed_stage_running=True,
-            )
+            try:
+                run_task_pipeline(
+                    session,
+                    claimed_job.task_id,
+                    start_stage_name=claimed_job.stage_name,
+                    claimed_stage_running=True,
+                )
+            finally:
+                if preflight_warning is not None:
+                    append_stage_log(log_file_for_stage(claimed_job.task_id, claimed_job.stage_name), preflight_warning)
     else:
         success = processor(claimed_job)
         complete_job(claimed_job.task_id, success=success)
