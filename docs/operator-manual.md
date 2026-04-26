@@ -15,13 +15,13 @@ It is not designed for public deployment, multi-user access, or internet-facing 
 
 ## Service layout
 
-`infra/docker-compose.yml` defines three services:
+The project still exposes the same three runtime roles regardless of whether you use the primary host workflow or the Docker fallback:
 
 - `api` runs FastAPI on port `8000`
 - `worker` runs the durable single-worker loop from `app.worker`
 - `web` runs the Vite dev server on port `5173`
 
-The `api` and `worker` services share the same backend image and the same storage mounts so they see one SQLite database and one artifact tree.
+The primary host workflow starts them with repo scripts. Docker can run the same roles as a fallback.
 
 ## Storage and mounts
 
@@ -47,28 +47,61 @@ Per-task layout:
 
 ## Startup
 
+Use `uv` plus `pnpm` first. Keep Docker as a fallback.
+
+Read `docs/deployment-guide.md` before first startup. It covers Linux plus CUDA, WSL plus ROCm, the pip compatibility path, runtime capability checks, and Docker fallback details.
+
+### Primary startup
+
 From the repo root:
 
 ```bash
-docker compose -f infra/docker-compose.yml up --build
+uv sync --project backend --frozen
+pnpm --dir web install --frozen-lockfile
+./scripts/dev_up.sh
 ```
+
+### Split-process startup
+
+From the repo root:
+
+```bash
+./scripts/dev_api.sh
+./scripts/dev_worker.sh
+./scripts/dev_web.sh
+```
+
+### Docker fallback startup
+
+Only use this when the primary host workflow is not practical:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --build api worker web
+```
+
+`infra/docker-compose.yml` still defines the same three services for the fallback path.
 
 Useful overrides:
 
-- `API_BIND_ADDRESS` to change the API bind IP, default `0.0.0.0`
-- `WEB_BIND_ADDRESS` to change the web bind IP, default `0.0.0.0`
+- `APP_HOST` to change the API bind IP, default `0.0.0.0`
+- `APP_PORT` to change the API port, default `8000`
+- `VITE_HOST` to change the web bind IP, default `0.0.0.0`
+- `VITE_PORT` to change the web port, default `5173`
 - `VITE_API_BASE_URL` to point browser clients at the host API URL
-- `APP_BILIBILI_COOKIE_PATH` to point the backend at a cookie file path inside the container
+- `APP_BILIBILI_COOKIE_PATH` to point the backend at a cookie file path
+- `APP_DATA_DIR` if you need storage outside the repo `data/` tree
 
 ### LAN access caveat for the web UI
 
 The default `VITE_API_BASE_URL` is `http://127.0.0.1:8000/api`.
 
-That works when the browser runs on the same host as Docker. If users open the UI from another LAN device, set `VITE_API_BASE_URL` to the host's LAN address before startup, for example:
+That works when the browser runs on the same host. If users open the UI from another LAN device, set `VITE_API_BASE_URL` to the host's LAN address before startup, for example:
 
 ```bash
-VITE_API_BASE_URL=http://192.168.1.50:8000/api docker compose -f infra/docker-compose.yml up --build
+VITE_API_BASE_URL=http://192.168.1.50:8000/api ./scripts/dev_web.sh
 ```
+
+For Docker fallback, apply the same value before `docker compose up`.
 
 ## Cookie and auth caveats for Bilibili access
 
@@ -143,6 +176,18 @@ The canonical backend stage order is:
 
 In the current MVP, pipeline `export` is intentionally marked as skipped until the user confirms a clip through `POST /api/tasks/{task_id}/clips`.
 
+## Runtime capability visibility
+
+Runtime capability checks are non-blocking visibility signals.
+
+Operators should look at three places:
+
+- `/api/health` for readiness plus the compact `runtime_capabilities` summary
+- `/api/runtime/capabilities` for the full payload with `status`, `detected_profile`, `platform`, `accelerator`, `dependencies`, and `warnings`
+- startup and worker logs for `runtime_capabilities_startup` and `worker_preflight_warning=<json>`
+
+Warnings do not stop startup. They stay visible in API responses, the UI, and logs so operators can correct degraded environments before running important jobs.
+
 ## Logs and troubleshooting
 
 Per-task stage logs live under `/data/tasks/<task_id>/logs/<stage>.log`.
@@ -153,7 +198,19 @@ Start here when a run fails:
 2. inspect the matching stage log under `/data/tasks/<task_id>/logs`
 3. check that model caches are populated and readable
 4. verify cookie availability if Bilibili access fails
-5. verify the media toolchain resolves inside the backend runtime, for example `docker compose -f infra/docker-compose.yml exec api python -c "import shutil; print({name: shutil.which(name) for name in ('BBDown', 'yt-dlp', 'ffmpeg', 'ffprobe')})"`
+5. verify the media toolchain resolves in the active runtime
+
+Primary host workflow example:
+
+```bash
+python3 -c "import shutil; print({name: shutil.which(name) for name in ('BBDown', 'yt-dlp', 'ffmpeg', 'ffprobe')})"
+```
+
+Docker fallback example:
+
+```bash
+docker compose -f infra/docker-compose.yml exec api python -c "import shutil; print({name: shutil.which(name) for name in ('BBDown', 'yt-dlp', 'ffmpeg', 'ffprobe')})"
+```
 
 ## LAN-only and non-support for public deployment
 

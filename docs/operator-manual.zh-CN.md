@@ -15,13 +15,13 @@
 
 ## 服务结构
 
-`infra/docker-compose.yml` 当前定义了三个服务：
+无论你使用主路径还是 Docker 回退路径，项目暴露的都是同一组运行角色：
 
 - `api`：在 `8000` 端口运行 FastAPI
 - `worker`：运行 `app.worker` 中的持久化单 worker 循环
 - `web`：在 `5173` 端口运行 Vite 开发服务器
 
-`api` 和 `worker` 复用同一个后端镜像，并共享同一套存储挂载，因此它们会看到同一个 SQLite 数据库和同一棵任务产物目录树。
+主路径通过仓库脚本启动这些角色。Docker 只作为回退路径保留。
 
 ## 存储与挂载
 
@@ -47,28 +47,61 @@
 
 ## 启动方式
 
+优先使用 `uv + pnpm`。Docker 仅作为回退方案。
+
+首次部署前请先阅读 `docs/deployment-guide.zh-CN.md`。其中已经覆盖 Linux 加 CUDA、WSL 加 ROCm、pip 兼容路径、运行时能力检查和 Docker 回退说明。
+
+### 主路径启动
+
 在仓库根目录执行：
 
 ```bash
-docker compose -f infra/docker-compose.yml up --build
+uv sync --project backend --frozen
+pnpm --dir web install --frozen-lockfile
+./scripts/dev_up.sh
 ```
+
+### 分进程启动
+
+在仓库根目录执行：
+
+```bash
+./scripts/dev_api.sh
+./scripts/dev_worker.sh
+./scripts/dev_web.sh
+```
+
+### Docker 回退启动
+
+只有在主机侧 `uv + pnpm` 流程不方便时才使用：
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --build api worker web
+```
+
+`infra/docker-compose.yml` 依然提供同一组 `api`、`worker`、`web` 服务。
 
 常用覆盖环境变量：
 
-- `API_BIND_ADDRESS`：修改 API 绑定地址，默认 `0.0.0.0`
-- `WEB_BIND_ADDRESS`：修改 Web 绑定地址，默认 `0.0.0.0`
+- `APP_HOST`：修改 API 绑定地址，默认 `0.0.0.0`
+- `APP_PORT`：修改 API 端口，默认 `8000`
+- `VITE_HOST`：修改 Web 绑定地址，默认 `0.0.0.0`
+- `VITE_PORT`：修改 Web 端口，默认 `5173`
 - `VITE_API_BASE_URL`：让浏览器访问正确的主机 API 地址
-- `APP_BILIBILI_COOKIE_PATH`：指定容器内 Bilibili Cookie 文件路径
+- `APP_BILIBILI_COOKIE_PATH`：指定 Bilibili Cookie 文件路径
+- `APP_DATA_DIR`：把数据目录放到仓库 `data/` 之外时使用
 
 ### Web UI 的局域网访问说明
 
 默认 `VITE_API_BASE_URL` 为 `http://127.0.0.1:8000/api`。
 
-当浏览器和 Docker 在同一台机器上时，这样配置是可行的。如果使用者从局域网其他设备打开 UI，请在启动前把 `VITE_API_BASE_URL` 改成主机的局域网地址，例如：
+当浏览器和服务运行在同一台机器上时，这样配置是可行的。如果使用者从局域网其他设备打开 UI，请在启动前把 `VITE_API_BASE_URL` 改成主机的局域网地址，例如：
 
 ```bash
-VITE_API_BASE_URL=http://192.168.1.50:8000/api docker compose -f infra/docker-compose.yml up --build
+VITE_API_BASE_URL=http://192.168.1.50:8000/api ./scripts/dev_web.sh
 ```
+
+如果你走 Docker 回退路径，也要在 `docker compose up` 前设置同样的值。
 
 ## Bilibili Cookie 与访问限制说明
 
@@ -143,6 +176,18 @@ worker 会一次领取一个待处理的持久化任务。
 
 在当前 MVP 中，流水线内的 `export` 阶段会先被标记为 `skipped`，直到用户通过 `POST /api/tasks/{task_id}/clips` 确认导出某个切片。
 
+## 运行时能力可见性
+
+运行时能力检查是非阻塞的可见性信号。
+
+操作人员应重点看三个位置：
+
+- `/api/health`，用于就绪检查，同时包含精简后的 `runtime_capabilities`
+- `/api/runtime/capabilities`，用于查看完整载荷，包含 `status`、`detected_profile`、`platform`、`accelerator`、`dependencies`、`warnings`
+- 启动日志和 worker 日志，其中会出现 `runtime_capabilities_startup` 与 `worker_preflight_warning=<json>`
+
+warning 不会阻止启动，但会持续暴露在 API、UI 和日志中，方便在执行关键任务前修复降级环境。
+
 ## 日志与排障
 
 每个任务的阶段日志位于 `/data/tasks/<task_id>/logs/<stage>.log`。
@@ -153,7 +198,15 @@ worker 会一次领取一个待处理的持久化任务。
 2. 打开对应的 `/data/tasks/<task_id>/logs/<stage>.log`
 3. 检查模型缓存是否已下载且具有可读权限
 4. 如果 Bilibili 访问失败，检查 Cookie 是否可用
-5. 检查容器内媒体工具是否可解析，例如：
+5. 检查当前运行环境里的媒体工具是否可解析
+
+主路径示例：
+
+```bash
+python3 -c "import shutil; print({name: shutil.which(name) for name in ('BBDown', 'yt-dlp', 'ffmpeg', 'ffprobe')})"
+```
+
+Docker 回退示例：
 
 ```bash
 docker compose -f infra/docker-compose.yml exec api python -c "import shutil; print({name: shutil.which(name) for name in ('BBDown', 'yt-dlp', 'ffmpeg', 'ffprobe')})"
