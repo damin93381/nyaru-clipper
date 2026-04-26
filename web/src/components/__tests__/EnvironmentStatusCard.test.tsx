@@ -18,15 +18,18 @@ const healthyCapabilities: RuntimeCapabilities = {
     backend: "rocm",
     cuda_version: null,
     device_count: 1,
+    device_name: "AMD Radeon RX 7800 XT",
     hip_version: "6.1.2",
     kind: "cuda",
     torch_available: true,
+    torch_build_family: "rocm",
     torch_version: "2.6.0+rocm6.1",
   },
   dependencies: {
     tools: {},
     python: {},
   },
+  issues: [],
   warnings: [],
 };
 
@@ -45,9 +48,11 @@ const warningCapabilities: RuntimeCapabilities = {
     backend: "cpu",
     cuda_version: null,
     device_count: 0,
+    device_name: null,
     hip_version: null,
     kind: "cpu",
     torch_available: true,
+    torch_build_family: "cpu",
     torch_version: "2.6.0",
   },
   dependencies: {
@@ -61,7 +66,47 @@ const warningCapabilities: RuntimeCapabilities = {
     },
     python: {},
   },
+  issues: [],
   warnings: ["GPU runtime was not detected; backend is operating in cpu-only mode."],
+};
+
+const wslCudaMismatchCapabilities: RuntimeCapabilities = {
+  status: "error",
+  detected_profile: "cpu-only",
+  platform: {
+    is_wsl: true,
+    machine: "x86_64",
+    release: "6.8.0-microsoft-standard-WSL2",
+    system: "linux",
+    version: "#1 SMP PREEMPT_DYNAMIC",
+  },
+  accelerator: {
+    available: false,
+    backend: "cpu",
+    cuda_version: "12.8",
+    device_count: 0,
+    device_name: null,
+    hip_version: null,
+    kind: "cpu",
+    torch_available: true,
+    torch_build_family: "cuda",
+    torch_version: "2.8.0+cu128",
+  },
+  dependencies: {
+    tools: {},
+    python: {},
+  },
+  issues: [
+    {
+      code: "wrong_torch_build_cuda_on_wsl",
+      message: "WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm build.",
+      severity: "error",
+    },
+  ],
+  warnings: [
+    "WSL detected a CUDA-built torch wheel. Install the dedicated WSL ROCm backend environment instead.",
+    "GPU runtime was not detected; backend is operating in cpu-only mode.",
+  ],
 };
 
 describe("EnvironmentStatusCard", () => {
@@ -86,5 +131,24 @@ describe("EnvironmentStatusCard", () => {
     expect(screen.getByText("Needs attention")).toBeInTheDocument();
     expect(screen.getByText(/warnings do not block task submission or task review/i)).toBeInTheDocument();
     expect(screen.getByText(/gpu runtime was not detected/i)).toBeInTheDocument();
+  });
+
+  it("renders a targeted WSL ROCm remediation message for CUDA torch wheels on WSL", () => {
+    render(<EnvironmentStatusCard capabilities={wslCudaMismatchCapabilities} />);
+
+    expect(screen.getByTestId("environment-status-card")).toHaveClass("environment-status-card--danger");
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(
+      screen.getByText("This WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm runtime."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Use the dedicated WSL ROCm backend environment so startup stays non-blocking while operators still see the exact wheel mismatch.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No accelerator detected · torch cuda build")).toBeInTheDocument();
+    expect(
+      screen.getByText("WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm build."),
+    ).toBeInTheDocument();
   });
 });

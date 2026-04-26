@@ -1,4 +1,8 @@
-import { type RuntimeCapabilities, type RuntimeCapabilityStatus, satisfiesFullFunctionProfile } from "../lib/types";
+import {
+  type RuntimeCapabilities,
+  type RuntimeCapabilityStatus,
+  satisfiesFullFunctionProfile,
+} from "../lib/types";
 
 interface EnvironmentStatusCardProps {
   capabilities?: RuntimeCapabilities | null;
@@ -44,11 +48,44 @@ function getCardTone(status: RuntimeCapabilityStatus): CardTone {
 function describeAcceleration(capabilities: RuntimeCapabilities): string {
   const { accelerator } = capabilities;
   if (!accelerator.available) {
+    if (accelerator.torch_build_family && accelerator.torch_build_family !== "unknown") {
+      return `No accelerator detected · torch ${accelerator.torch_build_family} build`;
+    }
     return "No accelerator detected";
   }
 
   const deviceLabel = accelerator.device_count === 1 ? "device" : "devices";
-  return `${accelerator.backend} · ${accelerator.device_count} ${deviceLabel}`;
+  const deviceName = accelerator.device_name ? ` · ${accelerator.device_name}` : "";
+  const buildFamily = accelerator.torch_build_family ? ` · torch ${accelerator.torch_build_family}` : "";
+  return `${accelerator.backend} · ${accelerator.device_count} ${deviceLabel}${deviceName}${buildFamily}`;
+}
+
+function hasIssue(capabilities: RuntimeCapabilities, code: string): boolean {
+  return capabilities.issues.some((issue) => issue.code === code);
+}
+
+function getPrimaryMessage(capabilities: RuntimeCapabilities, fullFunctionSatisfied: boolean): string {
+  if (fullFunctionSatisfied) {
+    return "Runtime checks report the expected full-function profile for this workstation.";
+  }
+
+  if (hasIssue(capabilities, "wrong_torch_build_cuda_on_wsl")) {
+    return "This WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm runtime.";
+  }
+
+  return "This environment does not currently satisfy the expected full-function profile.";
+}
+
+function getSupportMessage(capabilities: RuntimeCapabilities, fullFunctionSatisfied: boolean): string {
+  if (fullFunctionSatisfied) {
+    return "GPU-backed processing is available for the active runtime profile.";
+  }
+
+  if (hasIssue(capabilities, "wrong_torch_build_cuda_on_wsl")) {
+    return "Use the dedicated WSL ROCm backend environment so startup stays non-blocking while operators still see the exact wheel mismatch.";
+  }
+
+  return "Warnings do not block task submission or task review, but they may reduce processing capability.";
 }
 
 export function EnvironmentStatusCard({
@@ -98,12 +135,8 @@ export function EnvironmentStatusCard({
 
   const fullFunctionSatisfied = satisfiesFullFunctionProfile(capabilities);
   const tone = getCardTone(capabilities.status);
-  const warningCopy = fullFunctionSatisfied
-    ? "Runtime checks report the expected full-function profile for this workstation."
-    : "This environment does not currently satisfy the expected full-function profile.";
-  const supportCopy = fullFunctionSatisfied
-    ? "GPU-backed processing is available for the active runtime profile."
-    : "Warnings do not block task submission or task review, but they may reduce processing capability.";
+  const primaryMessage = getPrimaryMessage(capabilities, fullFunctionSatisfied);
+  const supportCopy = getSupportMessage(capabilities, fullFunctionSatisfied);
 
   return (
     <section
@@ -122,7 +155,7 @@ export function EnvironmentStatusCard({
         </div>
       </div>
 
-      <p>{warningCopy}</p>
+      <p>{primaryMessage}</p>
       <p className="environment-status-card__detail">{supportCopy}</p>
 
       <dl className="metadata-list environment-status-card__metadata">
@@ -142,6 +175,17 @@ export function EnvironmentStatusCard({
           <ul className="placeholder-list environment-status-card__warning-list">
             {capabilities.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {capabilities.issues.length > 0 ? (
+        <div className="environment-status-card__warnings">
+          <h3>Detected issues</h3>
+          <ul className="placeholder-list environment-status-card__warning-list">
+            {capabilities.issues.map((issue) => (
+              <li key={issue.code}>{issue.message}</li>
             ))}
           </ul>
         </div>

@@ -30,15 +30,18 @@ const warningCapabilities: RuntimeCapabilities = {
     backend: "cpu",
     cuda_version: null,
     device_count: 0,
+    device_name: null,
     hip_version: null,
     kind: "cpu",
     torch_available: true,
+    torch_build_family: "cpu",
     torch_version: "2.6.0",
   },
   dependencies: {
     tools: {},
     python: {},
   },
+  issues: [],
   warnings: ["GPU runtime was not detected; backend is operating in cpu-only mode."],
 };
 

@@ -112,10 +112,18 @@ export interface RuntimeCapabilityAccelerator {
   backend: string;
   cuda_version: string | null;
   device_count: number;
+  device_name: string | null;
   hip_version: string | null;
   kind: string;
   torch_available: boolean;
+  torch_build_family: string | null;
   torch_version: string | null;
+}
+
+export interface RuntimeCapabilityIssue {
+  code: string;
+  message: string;
+  severity: string;
 }
 
 export interface RuntimeDependencyCheck {
@@ -136,6 +144,7 @@ export interface RuntimeCapabilities {
     tools: Record<string, RuntimeDependencyCheck>;
     python: Record<string, RuntimeDependencyCheck>;
   };
+  issues: RuntimeCapabilityIssue[];
   warnings: string[];
 }
 
