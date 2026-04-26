@@ -164,16 +164,20 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "scenedetect", extra = ["opencv-headless"] },
     { name = "sqlmodel" },
-    { name = "torch" },
     { name = "transformers" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "whisperx" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+]
+linux-cuda = [
+    { name = "torch" },
+    { name = "torchaudio" },
+    { name = "torchvision" },
+    { name = "whisperx" },
 ]
 
 [package.metadata]
@@ -184,16 +188,20 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.6.0,<3.0.0" },
     { name = "scenedetect", extras = ["opencv-headless"], specifier = ">=0.6.0,<0.7.0" },
     { name = "sqlmodel", specifier = ">=0.0.22,<0.1.0" },
-    { name = "torch" },
     { name = "transformers", specifier = ">=4.46.0,<5.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0,<1.0.0" },
-    { name = "whisperx" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8.3.0,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0,<1.0.0" },
+]
+linux-cuda = [
+    { name = "torch", specifier = "==2.8.0" },
+    { name = "torchaudio", specifier = "==2.8.0" },
+    { name = "torchvision", specifier = "==0.23.0" },
+    { name = "whisperx", specifier = "==3.8.5" },
 ]
 
 [[package]]

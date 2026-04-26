@@ -11,9 +11,7 @@ dependencies = [
   "pydantic-settings>=2.6.0,<3.0.0",
   "scenedetect[opencv-headless]>=0.6.0,<0.7.0",
   "sqlmodel>=0.0.22,<0.1.0",
-  "torch",
   "transformers>=4.46.0,<5.0.0",
-  "whisperx",
   "uvicorn[standard]>=0.32.0,<1.0.0",
 ]
 
@@ -21,6 +19,24 @@ dependencies = [
 dev = [
   "pytest>=8.3.0,<9.0.0",
   "pytest-asyncio>=0.24.0,<1.0.0",
+]
+linux-cuda = [
+  "torch==2.8.0",
+  "torchaudio==2.8.0",
+  "torchvision==0.23.0",
+  "whisperx==3.8.5",
+]
+
+[tool.nyaru.backend-accelerator-profiles]
+accelerator-roots = ["torch", "whisperx"]
+
+[tool.nyaru.backend-accelerator-profiles.wsl-rocm]
+extra-index-url = "https://download.pytorch.org/whl/rocm6.4"
+requirements = [
+  "torch==2.8.0",
+  "torchaudio==2.8.0",
+  "torchvision==0.23.0",
+  "whisperx==3.8.5",
 ]
 
 [build-system]
