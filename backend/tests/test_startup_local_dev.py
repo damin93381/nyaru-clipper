@@ -24,8 +24,19 @@ def test_app_startup_import_and_health_route_work_without_docker(tmp_path, monke
     assert response.json()["status"] == "ok"
     assert response.json()["storage"] == "ok"
     assert response.json()["database"] == "ok"
-    assert list(response.json()["runtime_capabilities"].keys()) == [
+    runtime_capabilities = response.json()["runtime_capabilities"]
+
+    assert list(runtime_capabilities.keys()) == [
         "status",
         "detected_profile",
+        "accelerator",
         "warnings",
+        "issue_codes",
+    ]
+    assert list(runtime_capabilities["accelerator"].keys()) == [
+        "available",
+        "backend",
+        "device_count",
+        "device_name",
+        "torch_build_family",
     ]
