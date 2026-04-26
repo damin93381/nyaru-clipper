@@ -10,6 +10,21 @@ def _load_torch_module():
     return importlib.import_module("torch")
 
 
+def _empty_accelerator_payload() -> dict[str, bool | int | str | None]:
+    return {
+        "available": False,
+        "backend": "unknown",
+        "cuda_version": None,
+        "device_count": 0,
+        "device_name": None,
+        "hip_version": None,
+        "kind": "unknown",
+        "torch_available": False,
+        "torch_build_family": "unknown",
+        "torch_version": None,
+    }
+
+
 def _read_proc_version() -> str:
     try:
         with open("/proc/version", encoding="utf-8") as handle:
@@ -50,6 +65,37 @@ def _safe_is_available(cuda_runtime: object) -> bool:
         return False
 
 
+def _safe_device_name(cuda_runtime: object, *, device_count: int) -> str | None:
+    if device_count <= 0:
+        return None
+
+    get_device_name = getattr(cuda_runtime, "get_device_name", None)
+    if not callable(get_device_name):
+        return None
+
+    try:
+        device_name = get_device_name(0)
+    except Exception:
+        return None
+
+    return device_name if isinstance(device_name, str) and device_name else None
+
+
+def _detect_torch_build_family(*, torch_version: str | None, cuda_version: str | None, hip_version: str | None) -> str:
+    if hip_version:
+        return "rocm"
+    if cuda_version:
+        return "cuda"
+    if isinstance(torch_version, str):
+        normalized_version = torch_version.lower()
+        if "+rocm" in normalized_version:
+            return "rocm"
+        if "+cu" in normalized_version:
+            return "cuda"
+        return "cpu"
+    return "unknown"
+
+
 def _detect_accelerator(torch_module: object) -> dict[str, bool | int | str | None]:
     torch_version = getattr(torch_module, "__version__", None)
     version_info = getattr(torch_module, "version", None)
@@ -59,6 +105,12 @@ def _detect_accelerator(torch_module: object) -> dict[str, bool | int | str | No
     cuda_runtime = getattr(torch_module, "cuda", None)
     available = _safe_is_available(cuda_runtime)
     device_count = _safe_device_count(cuda_runtime)
+    device_name = _safe_device_name(cuda_runtime, device_count=device_count)
+    torch_build_family = _detect_torch_build_family(
+        torch_version=torch_version,
+        cuda_version=cuda_version,
+        hip_version=hip_version,
+    )
 
     backend = "unknown"
     kind = "unknown"
@@ -77,9 +129,11 @@ def _detect_accelerator(torch_module: object) -> dict[str, bool | int | str | No
         "backend": backend,
         "cuda_version": cuda_version,
         "device_count": device_count,
+        "device_name": device_name,
         "hip_version": hip_version,
         "kind": kind,
         "torch_available": True,
+        "torch_build_family": torch_build_family,
         "torch_version": torch_version,
     }
 
@@ -115,16 +169,14 @@ def detect_runtime_profile() -> dict[str, object]:
     try:
         torch_module = _load_torch_module()
     except ModuleNotFoundError:
-        accelerator = {
-            "available": False,
-            "backend": "unknown",
-            "cuda_version": None,
-            "device_count": 0,
-            "hip_version": None,
-            "kind": "unknown",
-            "torch_available": False,
-            "torch_version": None,
+        accelerator = _empty_accelerator_payload()
+        return {
+            "detected_profile": "unknown",
+            "platform": platform_payload,
+            "accelerator": accelerator,
         }
+    except Exception:
+        accelerator = _empty_accelerator_payload()
         return {
             "detected_profile": "unknown",
             "platform": platform_payload,
