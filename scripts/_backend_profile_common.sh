@@ -6,7 +6,8 @@ BACKEND_DIR="${ROOT_DIR}/backend"
 BACKEND_VENV_DIR="${BACKEND_DIR}/.venv"
 BACKEND_PYTHON_PATH="${BACKEND_VENV_DIR}/bin/python"
 BASE_REQUIREMENTS_PATH="${BACKEND_DIR}/requirements.txt"
-export ROOT_DIR BACKEND_DIR BACKEND_VENV_DIR BACKEND_PYTHON_PATH BASE_REQUIREMENTS_PATH
+BACKEND_PYTHON_VERSION="3.11"
+export ROOT_DIR BACKEND_DIR BACKEND_VENV_DIR BACKEND_PYTHON_PATH BASE_REQUIREMENTS_PATH BACKEND_PYTHON_VERSION
 
 require_commands() {
   local command_name
@@ -78,6 +79,6 @@ install_backend_profile() {
   printf 'profile artifact: %s\n' "${profile_requirements_path}"
 
   run_or_print "${dry_run}" bash "${ROOT_DIR}/scripts/export_backend_requirements.sh" --check
-  run_or_print "${dry_run}" uv venv "${BACKEND_VENV_DIR}"
-  run_or_print "${dry_run}" uv pip sync --python "${BACKEND_PYTHON_PATH}" "${BASE_REQUIREMENTS_PATH}" "${profile_requirements_path}"
+  run_or_print "${dry_run}" uv venv "${BACKEND_VENV_DIR}" --python "${BACKEND_PYTHON_VERSION}"
+  run_or_print "${dry_run}" uv pip sync --python "${BACKEND_PYTHON_PATH}" --index-strategy unsafe-best-match "${BASE_REQUIREMENTS_PATH}" "${profile_requirements_path}"
 }
