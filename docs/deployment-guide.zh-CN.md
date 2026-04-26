@@ -13,7 +13,7 @@
 | 路径 | 状态 | 适用场景 | 说明 |
 | --- | --- | --- | --- |
 | Linux + CUDA | 主路径 | Linux GPU 主机上的本地或自托管环境 | 面向完整项目工作流 |
-| WSL + ROCm | 支持目标 | 在 WSL 内运行，且运行时能识别 `wsl-rocm` | 目标是完整功能，不是简化模式 |
+| WSL + ROCm | 支持目标 | 在 WSL 内运行，且运行时能识别 `wsl-rocm` | 支持范围只覆盖 WSL2 Ubuntu 22.04 或 24.04，加官方 AMD ROCm 路径 |
 | pip 兼容路径 | 兼容路径 | 不能直接使用 `uv` 时的后端依赖安装方式 | 只用于兼容，不是首选全栈流程 |
 | Docker 回退 | 仅回退 | 主机侧 Python 或 Node 环境不方便时使用 | 不要把 Docker 当作默认路径 |
 
@@ -37,10 +37,16 @@
 
 ### 共用初始化
 
+这里的共用步骤只覆盖前端安装，以及仓库内共享的数据目录约定。
+
+受支持的 GPU 主机路径现在都通过专用后端安装包装脚本完成依赖安装：
+
+- Linux + CUDA：`./scripts/install_backend_linux_cuda.sh`
+- WSL + ROCm：`./scripts/install_backend_wsl_rocm.sh`
+
 在仓库根目录执行：
 
 ```bash
-uv sync --project backend --frozen
 pnpm --dir web install --frozen-lockfile
 ```
 
@@ -55,6 +61,17 @@ pnpm --dir web install --frozen-lockfile
 ## Linux + CUDA 主路径
 
 这是 Linux NVIDIA 主机上的标准本地或自托管部署方式。
+
+### 用专用 Linux + CUDA 包装脚本安装后端
+
+在仓库根目录执行：
+
+```bash
+./scripts/install_backend_linux_cuda.sh
+pnpm --dir web install --frozen-lockfile
+```
+
+不要把单独的 `uv sync --project backend --frozen` 当作这条路径的受支持后端安装合同。专用包装脚本会应用仓库中检查通过的 Linux CUDA 依赖配置。
 
 ### 启动完整栈
 
@@ -110,21 +127,55 @@ VITE_API_BASE_URL=http://192.168.1.50:8000/api ./scripts/dev_web.sh
 
 ## WSL + ROCm 完整功能目标
 
-当你在 WSL 内运行项目，并且 PyTorch 运行时能识别 ROCm 时，使用这条路径。
+这条路径只面向 WSL2 Ubuntu 22.04 或 24.04，并且前提是你已经按 AMD 官方 WSL 指南完成 ROCm 安装。
 
-这条路径的目标是完整功能，不是降级模式。前提是运行时配置能识别为 `wsl-rocm`，并且所需的主机媒体工具在 WSL 环境内可用。
+本文不宣称支持原生 Windows GPU、原生 Linux ROCm、Docker ROCm，也不覆盖更宽泛的 WSL 发行版范围。
 
-### 在 WSL 内启动
+### 支持的 WSL 流程
 
-在 WSL shell 中执行和主路径相同的命令：
+WSL 路径分成四步：
+
+1. 专用后端安装
+2. 专用 doctor 自检
+3. 继续复用现有 `dev_*` 脚本启动运行时
+4. 专用 WSL smoke 验证
+
+### 1. 用专用 WSL 包装脚本安装后端
+
+在 WSL 内，从仓库根目录执行：
 
 ```bash
-uv sync --project backend --frozen
+./scripts/install_backend_wsl_rocm.sh
 pnpm --dir web install --frozen-lockfile
+```
+
+不要在 WSL 上只执行 `uv sync --project backend --frozen` 就认为后端已经安装完成。专用包装脚本会应用仓库里检查通过的 WSL ROCm 依赖路径。
+
+### 2. 运行严格的 WSL doctor
+
+在 WSL 内，从仓库根目录执行：
+
+```bash
+./scripts/check_wsl_rocm.sh
+```
+
+成功输出应包含：
+
+- `WSL_ROCM_READY`
+- `torch.build_family=rocm`
+- `torch.cuda.is_available=True`
+
+如果这个命令失败，不要继续启动运行时，先修复 mismatch。
+
+### 3. 用共用入口启动运行时
+
+WSL 继续复用和 Linux + CUDA 主路径相同的运行时启动入口：
+
+```bash
 ./scripts/dev_up.sh
 ```
 
-如果要分终端运行，也使用同一组脚本：
+如果你要分终端运行，也继续使用：
 
 ```bash
 ./scripts/dev_api.sh
@@ -132,9 +183,21 @@ pnpm --dir web install --frozen-lockfile
 ./scripts/dev_web.sh
 ```
 
+项目没有单独的 WSL runtime launcher family。
+
+### 4. 运行专用 WSL smoke 路径
+
+在 WSL 内，从仓库根目录执行：
+
+```bash
+./scripts/release_smoke_wsl_rocm.sh
+```
+
+这个脚本会先跑 doctor，再启动共用本地栈，然后等待 `/api/health` 返回 `runtime_capabilities.detected_profile == "wsl-rocm"`，最后才进入现有下游 smoke 套件。
+
 ### 启动后检查什么
 
-启动后用下面的命令检查运行时画像：
+启动后用下面的命令检查完整运行时载荷：
 
 ```bash
 python3 - <<'PY'
@@ -148,13 +211,22 @@ print(json.dumps(payload, indent=2, ensure_ascii=False))
 PY
 ```
 
-对于正常的 WSL ROCm 环境，返回内容应体现：
+对于健康的 WSL ROCm 主机，返回内容应体现：
 
 - `detected_profile: "wsl-rocm"`
+- `status: "ok"`
 - `accelerator.backend: "rocm"`
+- `accelerator.torch_build_family: "rocm"`
 - `accelerator.available: true`
+- `issues: []`
 
-如果接口返回 `cpu-only`，启动依然会成功，但说明运行时已经退回 CPU 模式，应先修复 ROCm 路径，再投入实际任务。
+`issue_codes` 只属于 `/api/health`、启动日志、worker 预检摘要这类精简摘要视图。完整的 `/api/runtime/capabilities` 载荷暴露的是结构化 `issues` 条目。
+
+如果启动成功但接口给出了 mismatch，请把主机视为降级状态，并使用 doctor 和日志定位具体问题：
+
+- `wrong_torch_build_cuda_on_wsl`：已经识别到 WSL，但后端环境里还是 CUDA 版 torch。重新执行 `./scripts/install_backend_wsl_rocm.sh`。
+- `cpu_only_torch_on_wsl`：已经识别到 WSL，但后端环境里是 CPU-only torch。重新执行 `./scripts/install_backend_wsl_rocm.sh`。
+- `hip_build_no_device`：已经装了 ROCm torch，但 `torch.cuda` 仍然看不到 AMD GPU。先修复 WSL ROCm 栈，再重试。
 
 ## pip 兼容路径
 
@@ -237,10 +309,10 @@ Docker 的验证脚本也只应作为回退验证路径：
 这些信息会出现在以下位置：
 
 - API 就绪接口仍然是 `/api/health`
-- `/api/health` 会附带 `runtime_capabilities`，其中只有 `status`、`detected_profile`、`warnings`
+- `/api/health` 会附带 `runtime_capabilities`，其中包含 `status`、`detected_profile`、`warnings`、`issue_codes`，以及精简后的 `accelerator` 快照
 - 完整能力信息由 `/api/runtime/capabilities` 提供
 - API 启动时会在 `app.runtime` logger 写入一条 `runtime_capabilities_startup` JSON 日志
-- 如果存在 warning，worker 阶段日志会追加 `worker_preflight_warning=<json>`
+- worker 预检日志会追加 `worker_preflight_runtime=<json>`
 - Web UI 也会显示运行时状态，方便操作人员不看原始日志也能发现问题
 
 完整能力载荷的顶层键为：
@@ -251,6 +323,7 @@ Docker 的验证脚本也只应作为回退验证路径：
 - `accelerator`
 - `dependencies`
 - `warnings`
+- `issues`
 
 warning 的含义如下：
 
@@ -268,6 +341,12 @@ warning 的含义如下：
 
 ```bash
 ./scripts/release_smoke_non_docker.sh
+```
+
+专用 WSL ROCm 验证：
+
+```bash
+./scripts/release_smoke_wsl_rocm.sh
 ```
 
 Docker 回退验证：
@@ -294,7 +373,8 @@ with urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5) as re
 
 print(json.dumps(payload, indent=2, ensure_ascii=False))
 assert payload['status'] == 'ok'
-assert set(payload['runtime_capabilities'].keys()) == {'status', 'detected_profile', 'warnings'}
+runtime = payload['runtime_capabilities']
+assert set(runtime.keys()) == {'status', 'detected_profile', 'warnings', 'issue_codes', 'accelerator'}
 PY
 ```
 
@@ -324,12 +404,22 @@ PY
 ### API 已启动，但能力状态显示 `cpu-only`
 
 - 在 Linux 上，确认 PyTorch 能看到 CUDA 运行时
-- 在 WSL 上，确认运行时识别为 `wsl-rocm`
-- 在执行真实任务前，先查看 `/api/runtime/capabilities` 和 API 启动日志
+- 在 WSL 上，先执行 `./scripts/check_wsl_rocm.sh`，确认运行时能够识别为 `wsl-rocm`
+- 在执行真实任务前，先查看 `/api/runtime/capabilities`、`/api/health` 和 API 启动日志
 
-### worker 阶段日志里出现 `worker_preflight_warning=`
+### API 已启动，但 WSL 暴露了 mismatch issue code
 
-这代表 warning 可见，但不阻塞执行。也就是说 worker 已经启动，只是运行时检测到降级条件，在正式依赖产能或结果质量前应先修复。
+查看 `/api/health`、`/api/runtime/capabilities`、UI 环境状态卡片，以及 API 或 worker 日志中的这些精确代码：
+
+- `wrong_torch_build_cuda_on_wsl`
+- `cpu_only_torch_on_wsl`
+- `hip_build_no_device`
+
+这些状态本来就应该被暴露出来。启动不会被阻塞，但在 doctor 通过之前，这台主机都不属于受支持的 WSL ROCm 状态。
+
+### worker 阶段日志里出现 `worker_preflight_runtime=`
+
+这代表运行时状态已被记录下来，但不会阻塞执行。也就是说 worker 已经启动，只是运行时检测到降级条件，在正式依赖产能或结果质量前应先修复。
 
 ### pip 兼容安装失败
 

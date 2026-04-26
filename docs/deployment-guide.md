@@ -13,7 +13,7 @@ This project does not target cloud deployment, public internet exposure, multi-u
 | Path | Status | What it is for | Notes |
 | --- | --- | --- | --- |
 | Linux + CUDA | Primary | Main local and self-hosted path on a Linux GPU host | Full project workflow target |
-| WSL + ROCm | Supported target | Full-function path inside WSL when the runtime reports `wsl-rocm` | Treat WSL as the host environment |
+| WSL + ROCm | Supported target | Full-function path inside WSL when the runtime reports `wsl-rocm` | Supported scope is WSL2 Ubuntu 22.04 or 24.04 with the official AMD ROCm path |
 | pip compatibility | Compatibility path | Backend dependency install path for Python 3.11 environments that cannot use `uv` directly | Use for backend packaging compatibility, not as the preferred full stack workflow |
 | Docker fallback | Fallback only | Use when you need containerized API, worker, and web services | Do not treat Docker as the default path |
 
@@ -37,10 +37,16 @@ The backend dependency source of truth is `backend/pyproject.toml`. The checked-
 
 ### Shared setup
 
+Use this setup for the frontend install and shared repo-local data layout.
+
+Backend installs for the supported GPU host paths now use dedicated profile wrappers:
+
+- Linux + CUDA: `./scripts/install_backend_linux_cuda.sh`
+- WSL + ROCm: `./scripts/install_backend_wsl_rocm.sh`
+
 From the repo root:
 
 ```bash
-uv sync --project backend --frozen
 pnpm --dir web install --frozen-lockfile
 ```
 
@@ -55,6 +61,17 @@ The local scripts create repo-local data and cache directories automatically. By
 ## Linux + CUDA primary path
 
 Use this path for the normal local or self-hosted deployment on a Linux NVIDIA host.
+
+### Install the backend with the dedicated Linux + CUDA wrapper
+
+From the repo root:
+
+```bash
+./scripts/install_backend_linux_cuda.sh
+pnpm --dir web install --frozen-lockfile
+```
+
+Do not treat a plain `uv sync --project backend --frozen` as the supported backend install contract for this path. The dedicated wrapper applies the checked-in Linux CUDA dependency profile.
 
 ### Start the full stack
 
@@ -110,17 +127,51 @@ VITE_API_BASE_URL=http://192.168.1.50:8000/api ./scripts/dev_web.sh
 
 ## WSL + ROCm full-function target
 
-Use this path when you run the project inside WSL and the backend runtime reports ROCm through PyTorch.
+Use this path only inside WSL2 Ubuntu 22.04 or 24.04 after following the official AMD ROCm setup for WSL.
 
-This is a full-function target, not a reduced feature mode, as long as the runtime profile resolves to `wsl-rocm` and the required host media tools are available inside the WSL environment.
+This document does not claim support for native Windows GPU execution, native Linux ROCm, Docker ROCm, or any broader WSL distro matrix.
 
-### Start the stack inside WSL
+### Supported WSL flow
 
-Run the same commands from your WSL shell:
+The WSL path has four stages:
+
+1. dedicated backend install
+2. dedicated doctor command
+3. shared runtime startup with the existing `dev_*` scripts
+4. dedicated WSL smoke validation
+
+### 1. Install the backend with the dedicated WSL wrapper
+
+From the repo root inside WSL:
 
 ```bash
-uv sync --project backend --frozen
+./scripts/install_backend_wsl_rocm.sh
 pnpm --dir web install --frozen-lockfile
+```
+
+Do not rely on a plain `uv sync --project backend --frozen` backend install on WSL. The dedicated wrapper applies the checked-in WSL ROCm dependency path.
+
+### 2. Run the strict WSL doctor
+
+From the repo root inside WSL:
+
+```bash
+./scripts/check_wsl_rocm.sh
+```
+
+Expected success output includes:
+
+- `WSL_ROCM_READY`
+- `torch.build_family=rocm`
+- `torch.cuda.is_available=True`
+
+If this command fails, do not continue into runtime startup until the mismatch is fixed.
+
+### 3. Start the runtime with the shared entrypoints
+
+WSL keeps the same runtime launch path as the Linux + CUDA host workflow:
+
+```bash
 ./scripts/dev_up.sh
 ```
 
@@ -132,9 +183,21 @@ Or split the processes across terminals:
 ./scripts/dev_web.sh
 ```
 
-### What to verify
+There is no separate WSL runtime launcher family.
 
-After startup, check the runtime profile:
+### 4. Run the dedicated WSL smoke path
+
+From the repo root inside WSL:
+
+```bash
+./scripts/release_smoke_wsl_rocm.sh
+```
+
+This script runs the dedicated doctor first, then starts the shared local stack, then waits until `/api/health` reports `runtime_capabilities.detected_profile == "wsl-rocm"` before it continues into the downstream smoke suite.
+
+### What to verify after startup
+
+After startup, check the full runtime payload:
 
 ```bash
 python3 - <<'PY'
@@ -148,13 +211,22 @@ print(json.dumps(payload, indent=2, ensure_ascii=False))
 PY
 ```
 
-For a healthy ROCm-backed WSL setup, the payload should report:
+For a healthy WSL ROCm host, the payload should report:
 
 - `detected_profile: "wsl-rocm"`
+- `status: "ok"`
 - `accelerator.backend: "rocm"`
+- `accelerator.torch_build_family: "rocm"`
 - `accelerator.available: true`
+- `issues: []`
 
-If the API reports `cpu-only` instead, startup still succeeds, but the runtime has fallen back to CPU mode and you should treat the environment as degraded until the ROCm path is fixed.
+`issue_codes` belongs to compact summary surfaces such as `/api/health`, startup logs, and worker preflight summaries. The full `/api/runtime/capabilities` payload exposes structured `issues` entries instead.
+
+If startup succeeds but the runtime reports a mismatch, treat the host as degraded and use the doctor plus logs to identify the exact issue:
+
+- `wrong_torch_build_cuda_on_wsl`: WSL host detected, but the backend environment still has a CUDA torch build. Reinstall with `./scripts/install_backend_wsl_rocm.sh`.
+- `cpu_only_torch_on_wsl`: WSL host detected, but the backend environment has a CPU-only torch build. Reinstall with `./scripts/install_backend_wsl_rocm.sh`.
+- `hip_build_no_device`: ROCm torch is installed, but `torch.cuda` still cannot expose an AMD GPU. Fix the WSL ROCm stack before retrying.
 
 ## pip compatibility path
 
@@ -237,10 +309,10 @@ Runtime capability checks are visibility features. They do not block startup.
 What surfaces where:
 
 - API readiness stays available at `/api/health`
-- `/api/health` adds `runtime_capabilities` with `status`, `detected_profile`, and `warnings`
+- `/api/health` adds `runtime_capabilities` with `status`, `detected_profile`, `warnings`, `issue_codes`, and a compact `accelerator` snapshot
 - full capability details are exposed at `/api/runtime/capabilities`
 - the API writes one startup log line on logger `app.runtime` with event `runtime_capabilities_startup`
-- worker stage logs append `worker_preflight_warning=<json>` when warnings exist
+- worker preflight logs append `worker_preflight_runtime=<json>`
 - the web UI shows runtime status so operators can see warnings without reading raw logs
 
 The full capability payload uses these top-level keys:
@@ -251,6 +323,7 @@ The full capability payload uses these top-level keys:
 - `accelerator`
 - `dependencies`
 - `warnings`
+- `issues`
 
 Warning semantics:
 
@@ -268,6 +341,12 @@ Primary local path:
 
 ```bash
 ./scripts/release_smoke_non_docker.sh
+```
+
+Dedicated WSL ROCm path:
+
+```bash
+./scripts/release_smoke_wsl_rocm.sh
 ```
 
 Docker fallback path:
@@ -294,7 +373,8 @@ with urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5) as re
 
 print(json.dumps(payload, indent=2, ensure_ascii=False))
 assert payload['status'] == 'ok'
-assert set(payload['runtime_capabilities'].keys()) == {'status', 'detected_profile', 'warnings'}
+runtime = payload['runtime_capabilities']
+assert set(runtime.keys()) == {'status', 'detected_profile', 'warnings', 'issue_codes', 'accelerator'}
 PY
 ```
 
@@ -324,12 +404,22 @@ PY
 ### API starts, but capability status shows `cpu-only`
 
 - on Linux, confirm the CUDA runtime is visible to PyTorch
-- on WSL, confirm the runtime reports `wsl-rocm`
-- read `/api/runtime/capabilities` and the API startup log before running a real task
+- on WSL, run `./scripts/check_wsl_rocm.sh` first and confirm the runtime can report `wsl-rocm`
+- read `/api/runtime/capabilities`, `/api/health`, and the API startup log before running a real task
 
-### The worker starts, but a stage log contains `worker_preflight_warning=`
+### API starts, but WSL reports a mismatch issue code
 
-That warning is non-blocking. It means the worker is running, but the runtime detected a degraded condition that should be fixed before trusting performance or output quality.
+Check `/api/health`, `/api/runtime/capabilities`, the UI environment card, and the API or worker logs for these exact codes:
+
+- `wrong_torch_build_cuda_on_wsl`
+- `cpu_only_torch_on_wsl`
+- `hip_build_no_device`
+
+These states are visible by design. Startup stays non-blocking, but the host is not in the supported WSL ROCm state until the doctor passes.
+
+### The worker starts, but a stage log contains `worker_preflight_runtime=`
+
+That payload is non-blocking. It means the worker is running, but the runtime detected a degraded condition that should be fixed before trusting performance or output quality.
 
 ### The pip compatibility install fails
 
