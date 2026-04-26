@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 from shutil import which
 
+from app.services.runtime_diagnostics import derive_runtime_diagnostics
 from app.services.runtime_profile import detect_runtime_profile
 from app.settings import get_settings
 
@@ -13,6 +14,17 @@ def _which(binary: str) -> str | None:
 
 def _import_module(module_name: str):
     return importlib.import_module(module_name)
+
+
+def _dependency_warning_message(*, dependency_name: str, module_name: str, error: Exception | None = None) -> str:
+    if error is None:
+        if dependency_name == "whisperx_diarization":
+            return "Python dependency path for WhisperX diarization ('pyannote.audio') is unavailable."
+        return f"Python dependency '{module_name}' is not installed."
+
+    if dependency_name == "whisperx_diarization":
+        return f"Python dependency path for WhisperX diarization ('pyannote.audio') failed to import: {error}"
+    return f"Python dependency '{module_name}' failed to import: {error}"
 
 
 def _build_tool_checks() -> tuple[dict[str, dict[str, str | bool | None]], list[str], bool]:
@@ -69,10 +81,21 @@ def _build_python_checks() -> tuple[dict[str, dict[str, str | bool | None]], lis
                 "status": status,
                 "version": None,
             }
-            if dependency_name == "whisperx_diarization":
-                warnings.append("Python dependency path for WhisperX diarization ('pyannote.audio') is unavailable.")
-            else:
-                warnings.append(f"Python dependency '{module_name}' is not installed.")
+            warnings.append(_dependency_warning_message(dependency_name=dependency_name, module_name=module_name))
+            has_error = has_error or is_core
+            continue
+        except Exception as error:
+            is_core = dependency_name in core_dependencies
+            status = "error" if is_core else "warning"
+            payload[dependency_name] = {
+                "available": False,
+                "module": module_name,
+                "status": status,
+                "version": None,
+            }
+            warnings.append(
+                _dependency_warning_message(dependency_name=dependency_name, module_name=module_name, error=error)
+            )
             has_error = has_error or is_core
             continue
 
@@ -98,16 +121,15 @@ def get_runtime_capabilities() -> dict[str, object]:
     runtime_profile = detect_runtime_profile()
     tool_payload, tool_warnings, tool_errors = _build_tool_checks()
     python_payload, python_warnings, python_errors = _build_python_checks()
+    runtime_issues, runtime_warnings, runtime_errors = derive_runtime_diagnostics(runtime_profile)
 
     warnings: list[str] = []
-    if runtime_profile["detected_profile"] == "cpu-only":
-        warnings.append("GPU runtime was not detected; backend is operating in cpu-only mode.")
-
+    warnings.extend(runtime_warnings)
     warnings.extend(tool_warnings)
     warnings.extend(python_warnings)
 
     return {
-        "status": _derive_status(warnings=warnings, has_error=tool_errors or python_errors),
+        "status": _derive_status(warnings=warnings, has_error=tool_errors or python_errors or runtime_errors),
         "detected_profile": runtime_profile["detected_profile"],
         "platform": runtime_profile["platform"],
         "accelerator": runtime_profile["accelerator"],
@@ -116,4 +138,5 @@ def get_runtime_capabilities() -> dict[str, object]:
             "python": python_payload,
         },
         "warnings": warnings,
+        "issues": runtime_issues,
     }
