@@ -99,6 +99,11 @@ input {
   align-items: start;
 }
 
+.app-shell__rail {
+  display: grid;
+  gap: var(--space-6);
+}
+
 .app-shell__main,
 .page,
 .detail-page,
@@ -339,6 +344,12 @@ input {
   color: var(--accent-warning);
 }
 
+.status-badge--warning {
+  color: var(--accent-warning);
+  border-color: currentColor;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .status-badge--success {
   color: var(--accent-success);
 }
@@ -373,6 +384,55 @@ input {
 .download-link {
   display: grid;
   gap: var(--space-4);
+}
+
+.environment-status-card,
+.environment-status-card__header,
+.environment-status-card__badges,
+.environment-status-card__warnings {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.environment-status-card {
+  border-color: var(--border-strong);
+}
+
+.environment-status-card__header {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.environment-status-card__badges {
+  grid-template-columns: repeat(2, max-content);
+}
+
+.environment-status-card--healthy {
+  border-color: rgba(74, 222, 128, 0.35);
+  background: linear-gradient(180deg, rgba(17, 26, 46, 0.95), rgba(17, 26, 46, 0.82));
+}
+
+.environment-status-card--warning {
+  border-color: rgba(250, 204, 21, 0.35);
+  background: linear-gradient(180deg, rgba(47, 39, 11, 0.9), rgba(17, 26, 46, 0.9));
+}
+
+.environment-status-card--danger {
+  border-color: rgba(251, 113, 133, 0.4);
+  background: rgba(45, 24, 32, 0.94);
+}
+
+.environment-status-card--loading {
+  border-style: dashed;
+}
+
+.environment-status-card__detail,
+.environment-status-card__warning-list {
+  color: var(--text-secondary);
+}
+
+.environment-status-card__warnings h3 {
+  margin: 0;
+  font-size: 1rem;
 }
 
 .workspace-layout {
