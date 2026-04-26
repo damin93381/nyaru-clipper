@@ -26,7 +26,9 @@ async def lifespan(_: FastAPI):
                 "event": "runtime_capabilities_startup",
                 "profile": runtime_summary["detected_profile"],
                 "status": runtime_summary["status"],
+                "accelerator": runtime_summary["accelerator"],
                 "warnings": runtime_summary["warnings"],
+                "issue_codes": runtime_summary["issue_codes"],
             }
         )
     )

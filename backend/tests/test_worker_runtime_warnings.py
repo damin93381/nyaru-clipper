@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from pathlib import Path
 
@@ -37,40 +38,48 @@ def _create_task(source_url: str) -> str:
 
 def _warning_payload() -> dict[str, object]:
     return {
-        "status": "warning",
+        "status": "error",
         "detected_profile": "cpu-only",
         "platform": {
-            "is_wsl": False,
+            "is_wsl": True,
             "machine": "x86_64",
-            "release": "6.8.0-generic",
+            "release": "6.8.0-microsoft-standard-WSL2",
             "system": "linux",
             "version": "#1 SMP PREEMPT_DYNAMIC",
         },
         "accelerator": {
             "available": False,
             "backend": "cpu",
-            "cuda_version": None,
+            "cuda_version": "12.8",
             "device_count": 0,
+            "device_name": None,
             "hip_version": None,
             "kind": "cpu",
             "torch_available": True,
-            "torch_version": "2.6.0",
+            "torch_build_family": "cuda",
+            "torch_version": "2.8.0+cu128",
         },
         "dependencies": {"tools": {}, "python": {}},
         "warnings": [
+            "WSL detected a CUDA-built torch wheel. Install the dedicated WSL ROCm backend environment instead.",
             "GPU runtime was not detected; backend is operating in cpu-only mode.",
             "System tool 'ffprobe' was not found on PATH.",
+        ],
+        "issues": [
+            {
+                "code": "wrong_torch_build_cuda_on_wsl",
+                "message": "WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm build.",
+                "severity": "error",
+            }
         ],
     }
 
 
-def _expected_warning_summary() -> str:
-    return (
-        'worker_preflight_warning={"detected_profile": "cpu-only", '
-        '"status": "warning", '
-        '"warnings": ["GPU runtime was not detected; backend is operating in cpu-only mode.", '
-        '"System tool \'ffprobe\' was not found on PATH."]}'
-    )
+def _extract_runtime_summary(summary: str | None) -> dict[str, object]:
+    assert summary is not None
+    prefix = "worker_preflight_runtime="
+    assert summary.startswith(prefix)
+    return json.loads(summary.removeprefix(prefix))
 
 
 def test_worker_iteration_surfaces_runtime_warnings_in_stage_log_summary(backend_env, monkeypatch) -> None:
@@ -114,10 +123,31 @@ def test_worker_iteration_surfaces_runtime_warnings_in_stage_log_summary(backend
         log_summaries = list_task_log_summaries(session, task_id)
 
     assert log_summaries is not None
-    assert any(
-        entry["stage_name"] == "ingest" and entry["summary"] == _expected_warning_summary()
-        for entry in log_summaries
-    )
+    ingest_summary = next(entry["summary"] for entry in log_summaries if entry["stage_name"] == "ingest")
+    assert _extract_runtime_summary(ingest_summary) == {
+        "accelerator": {
+            "available": False,
+            "backend": "cpu",
+            "device_count": 0,
+            "device_name": None,
+            "torch_build_family": "cuda",
+        },
+        "detected_profile": "cpu-only",
+        "issue_codes": ["wrong_torch_build_cuda_on_wsl"],
+        "issues": [
+            {
+                "code": "wrong_torch_build_cuda_on_wsl",
+                "message": "WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm build.",
+                "severity": "error",
+            }
+        ],
+        "status": "error",
+        "warnings": [
+            "WSL detected a CUDA-built torch wheel. Install the dedicated WSL ROCm backend environment instead.",
+            "GPU runtime was not detected; backend is operating in cpu-only mode.",
+            "System tool 'ffprobe' was not found on PATH.",
+        ],
+    }
 
 
 def test_worker_retry_preserves_runtime_warning_surfacing(backend_env, monkeypatch) -> None:
@@ -196,8 +226,29 @@ def test_worker_retry_preserves_runtime_warning_surfacing(backend_env, monkeypat
         translation_attempts = stages["translation"].attempts
 
     assert log_summaries is not None
-    assert any(
-        entry["stage_name"] == "translation" and entry["summary"] == _expected_warning_summary()
-        for entry in log_summaries
-    )
+    translation_summary = next(entry["summary"] for entry in log_summaries if entry["stage_name"] == "translation")
+    assert _extract_runtime_summary(translation_summary) == {
+        "accelerator": {
+            "available": False,
+            "backend": "cpu",
+            "device_count": 0,
+            "device_name": None,
+            "torch_build_family": "cuda",
+        },
+        "detected_profile": "cpu-only",
+        "issue_codes": ["wrong_torch_build_cuda_on_wsl"],
+        "issues": [
+            {
+                "code": "wrong_torch_build_cuda_on_wsl",
+                "message": "WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm build.",
+                "severity": "error",
+            }
+        ],
+        "status": "error",
+        "warnings": [
+            "WSL detected a CUDA-built torch wheel. Install the dedicated WSL ROCm backend environment instead.",
+            "GPU runtime was not detected; backend is operating in cpu-only mode.",
+            "System tool 'ffprobe' was not found on PATH.",
+        ],
+    }
     assert translation_attempts == 2

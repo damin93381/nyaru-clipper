@@ -21,21 +21,42 @@ class ClaimedJob:
     stage_name: str
 
 
-def _build_preflight_warning_summary(capabilities: dict[str, object]) -> str | None:
+def _build_preflight_runtime_summary(capabilities: dict[str, object]) -> str | None:
     warnings = capabilities.get("warnings")
-    if not isinstance(warnings, list) or not warnings:
+    issues = capabilities.get("issues")
+    has_warnings = isinstance(warnings, list) and bool(warnings)
+    has_issues = isinstance(issues, list) and bool(issues)
+    if not has_warnings and not has_issues:
         return None
 
+    issue_codes = [issue.get("code") for issue in issues if isinstance(issue, dict) and issue.get("code")] if isinstance(issues, list) else []
+    accelerator_payload = capabilities.get("accelerator")
+    accelerator_summary = {
+        "available": accelerator_payload.get("available"),
+        "backend": accelerator_payload.get("backend"),
+        "device_count": accelerator_payload.get("device_count"),
+        "device_name": accelerator_payload.get("device_name"),
+        "torch_build_family": accelerator_payload.get("torch_build_family"),
+    } if isinstance(accelerator_payload, dict) else {
+        "available": None,
+        "backend": None,
+        "device_count": None,
+        "device_name": None,
+        "torch_build_family": None,
+    }
     summary_payload = {
         "detected_profile": capabilities.get("detected_profile"),
         "status": capabilities.get("status"),
+        "accelerator": accelerator_summary,
+        "issues": issues if isinstance(issues, list) else [],
+        "issue_codes": issue_codes,
         "warnings": warnings,
     }
-    return f"worker_preflight_warning={json.dumps(summary_payload, ensure_ascii=False, sort_keys=True)}"
+    return f"worker_preflight_runtime={json.dumps(summary_payload, ensure_ascii=False, sort_keys=True)}"
 
 
-def _surface_preflight_warning(task_id: str, stage_name: str) -> str | None:
-    summary = _build_preflight_warning_summary(capability_checks.get_runtime_capabilities())
+def _surface_preflight_runtime_summary(task_id: str, stage_name: str) -> str | None:
+    summary = _build_preflight_runtime_summary(capability_checks.get_runtime_capabilities())
     if summary is None:
         return None
 
@@ -115,7 +136,7 @@ def run_worker_iteration(processor: Callable[[ClaimedJob], bool] | None = None) 
     if claimed_job is None:
         return None
     if processor is None:
-        preflight_warning = _surface_preflight_warning(claimed_job.task_id, claimed_job.stage_name)
+        preflight_runtime_summary = _surface_preflight_runtime_summary(claimed_job.task_id, claimed_job.stage_name)
         with session_scope() as session:
             try:
                 run_task_pipeline(
@@ -125,8 +146,8 @@ def run_worker_iteration(processor: Callable[[ClaimedJob], bool] | None = None) 
                     claimed_stage_running=True,
                 )
             finally:
-                if preflight_warning is not None:
-                    append_stage_log(log_file_for_stage(claimed_job.task_id, claimed_job.stage_name), preflight_warning)
+                if preflight_runtime_summary is not None:
+                    append_stage_log(log_file_for_stage(claimed_job.task_id, claimed_job.stage_name), preflight_runtime_summary)
     else:
         success = processor(claimed_job)
         complete_job(claimed_job.task_id, success=success)
