@@ -56,10 +56,23 @@
 在仓库根目录执行：
 
 ```bash
-uv sync --project backend --frozen
+./scripts/install_backend_linux_cuda.sh
 pnpm --dir web install --frozen-lockfile
 ./scripts/dev_up.sh
 ```
+
+上面这条专用后端安装包装脚本就是 Linux + CUDA 主机路径的受支持安装合同，对应仓库中检查通过的 Linux CUDA 依赖配置。
+
+如果你运行的是 WSL2 Ubuntu 22.04 或 24.04，并且按 AMD 官方路径部署了 ROCm，请改用：
+
+```bash
+./scripts/install_backend_wsl_rocm.sh
+pnpm --dir web install --frozen-lockfile
+./scripts/check_wsl_rocm.sh
+./scripts/dev_up.sh
+```
+
+WSL 运行时启动仍然继续复用 `./scripts/dev_api.sh`、`./scripts/dev_worker.sh`、`./scripts/dev_web.sh`、`./scripts/dev_up.sh` 这组共用入口。
 
 ### 分进程启动
 
@@ -137,13 +150,20 @@ VITE_API_BASE_URL=http://192.168.1.50:8000/api ./scripts/dev_web.sh
 
 ## GPU 假设
 
-当前 MVP 假设部署在一台 NVIDIA GPU 主机上。
+当前 MVP 假设只有一台 GPU 主机和一个活动 worker。
 
-Compose 中设置了：
+支持的主机侧运行目标只有两类：
+
+- Linux + CUDA
+- WSL2 Ubuntu 22.04 或 24.04，加官方 AMD ROCm 路径，并且运行时能够报告 `wsl-rocm`
+
+Docker 回退路径目前仍然是 NVIDIA 导向的。`infra/docker-compose.yml` 依然设置了：
 
 - `NVIDIA_VISIBLE_DEVICES`
 - `NVIDIA_DRIVER_CAPABILITIES`
 - `api` 与 `worker` 的 GPU 预留配置
+
+不要把 Docker 回退路径当作 WSL ROCm 路径。
 
 整个流水线按设计只允许单 worker 运行。不要在当前 MVP 中横向扩容 `worker`。
 
@@ -180,13 +200,36 @@ worker 会一次领取一个待处理的持久化任务。
 
 运行时能力检查是非阻塞的可见性信号。
 
-操作人员应重点看三个位置：
+操作人员应重点看四个位置：
 
+- `./scripts/check_wsl_rocm.sh`，这是 WSL 专用的严格 doctor，自检通过前不要信任 WSL 主机
 - `/api/health`，用于就绪检查，同时包含精简后的 `runtime_capabilities`
-- `/api/runtime/capabilities`，用于查看完整载荷，包含 `status`、`detected_profile`、`platform`、`accelerator`、`dependencies`、`warnings`
-- 启动日志和 worker 日志，其中会出现 `runtime_capabilities_startup` 与 `worker_preflight_warning=<json>`
+- `/api/runtime/capabilities`，用于查看完整载荷，包含 `status`、`detected_profile`、`platform`、`accelerator`、`dependencies`、`warnings`、`issues`
+- 启动日志和 worker 日志，其中会出现 `runtime_capabilities_startup` 与 `worker_preflight_runtime=<json>`
 
 warning 不会阻止启动，但会持续暴露在 API、UI 和日志中，方便在执行关键任务前修复降级环境。
+
+### 精简摘要里应该看到什么
+
+`/api/health` 仍然保持精简，但运维侧应该能直接看到：
+
+- `runtime_capabilities.status`
+- `runtime_capabilities.detected_profile`
+- `runtime_capabilities.warnings`
+- `runtime_capabilities.issue_codes`
+- `runtime_capabilities.accelerator`
+
+其中 `accelerator` 的精简摘要足够确认 `torch_build_family`、`available`、`device_count`、`device_name` 是否合理，无需先打开完整载荷。
+
+### WSL mismatch code 的运维含义
+
+如果目标主机是 WSL + ROCm，这三个 issue code 就是面向操作人员的 mismatch 合同：
+
+- `wrong_torch_build_cuda_on_wsl`：已经识别到 WSL，但后端环境里还是 CUDA 版 torch。重新执行 `./scripts/install_backend_wsl_rocm.sh`，然后重新跑 `./scripts/check_wsl_rocm.sh`。
+- `cpu_only_torch_on_wsl`：已经识别到 WSL，但后端环境里是 CPU-only torch。重新执行 `./scripts/install_backend_wsl_rocm.sh`，然后重新跑 `./scripts/check_wsl_rocm.sh`。
+- `hip_build_no_device`：已经装了 ROCm torch，但 `torch.cuda` 仍然看不到 GPU。先修复 WSL ROCm 栈，再重新跑 `./scripts/check_wsl_rocm.sh`。
+
+这些代码应该在 API、UI 环境状态卡片、API 启动日志和 worker 预检日志中保持一致。
 
 ## 日志与排障
 

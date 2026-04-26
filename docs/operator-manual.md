@@ -56,10 +56,23 @@ Read `docs/deployment-guide.md` before first startup. It covers Linux plus CUDA,
 From the repo root:
 
 ```bash
-uv sync --project backend --frozen
+./scripts/install_backend_linux_cuda.sh
 pnpm --dir web install --frozen-lockfile
 ./scripts/dev_up.sh
 ```
+
+Use that dedicated backend install wrapper for the Linux + CUDA host path. It is the supported install contract for the checked-in Linux CUDA dependency profile.
+
+For WSL2 Ubuntu 22.04 or 24.04 with the official AMD ROCm path, install the backend with:
+
+```bash
+./scripts/install_backend_wsl_rocm.sh
+pnpm --dir web install --frozen-lockfile
+./scripts/check_wsl_rocm.sh
+./scripts/dev_up.sh
+```
+
+Runtime startup stays on the shared `./scripts/dev_api.sh`, `./scripts/dev_worker.sh`, `./scripts/dev_web.sh`, and `./scripts/dev_up.sh` entrypoints.
 
 ### Split-process startup
 
@@ -137,13 +150,20 @@ What to expect:
 
 ## GPU assumptions
 
-This MVP assumes one NVIDIA GPU host.
+This MVP assumes one GPU host and one active worker.
 
-Compose sets:
+Supported host-side runtime targets are:
+
+- Linux + CUDA on a Linux GPU host
+- WSL2 Ubuntu 22.04 or 24.04 with the official AMD ROCm path, when the runtime reports `wsl-rocm`
+
+Docker fallback remains NVIDIA-oriented today. `infra/docker-compose.yml` still sets:
 
 - `NVIDIA_VISIBLE_DEVICES`
 - `NVIDIA_DRIVER_CAPABILITIES`
 - GPU reservation entries for `api` and `worker`
+
+Do not treat Docker fallback as the WSL ROCm path.
 
 The actual pipeline is single-worker by design. Do not scale `worker` horizontally for this MVP.
 
@@ -180,13 +200,36 @@ In the current MVP, pipeline `export` is intentionally marked as skipped until t
 
 Runtime capability checks are non-blocking visibility signals.
 
-Operators should look at three places:
+Operators should look at four places:
 
+- `./scripts/check_wsl_rocm.sh` for the strict WSL-only doctor result before you trust a WSL host
 - `/api/health` for readiness plus the compact `runtime_capabilities` summary
-- `/api/runtime/capabilities` for the full payload with `status`, `detected_profile`, `platform`, `accelerator`, `dependencies`, and `warnings`
-- startup and worker logs for `runtime_capabilities_startup` and `worker_preflight_warning=<json>`
+- `/api/runtime/capabilities` for the full payload with `status`, `detected_profile`, `platform`, `accelerator`, `dependencies`, `warnings`, and `issues`
+- startup and worker logs for `runtime_capabilities_startup` and `worker_preflight_runtime=<json>`
 
 Warnings do not stop startup. They stay visible in API responses, the UI, and logs so operators can correct degraded environments before running important jobs.
+
+### What the compact summary should tell you
+
+`/api/health` keeps the response compact, but operators should still expect:
+
+- `runtime_capabilities.status`
+- `runtime_capabilities.detected_profile`
+- `runtime_capabilities.warnings`
+- `runtime_capabilities.issue_codes`
+- `runtime_capabilities.accelerator`
+
+The compact `accelerator` summary is enough to confirm whether the runtime exposed `torch_build_family`, `available`, `device_count`, and `device_name` without opening the full payload first.
+
+### WSL mismatch codes and what they mean
+
+If the host target is WSL + ROCm, these issue codes are the operator-facing mismatch contract:
+
+- `wrong_torch_build_cuda_on_wsl`: WSL was detected, but the backend environment still contains a CUDA torch build. Reinstall with `./scripts/install_backend_wsl_rocm.sh`, then rerun `./scripts/check_wsl_rocm.sh`.
+- `cpu_only_torch_on_wsl`: WSL was detected, but the backend environment contains a CPU-only torch build. Reinstall with `./scripts/install_backend_wsl_rocm.sh`, then rerun `./scripts/check_wsl_rocm.sh`.
+- `hip_build_no_device`: ROCm torch is installed, but `torch.cuda` still cannot expose a GPU device. Fix the WSL ROCm stack, then rerun `./scripts/check_wsl_rocm.sh`.
+
+These codes should line up across API responses, the UI environment status card, the API startup log, and worker preflight logs.
 
 ## Logs and troubleshooting
 
