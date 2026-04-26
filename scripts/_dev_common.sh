@@ -2,7 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BACKEND_DIR="${ROOT_DIR}/backend"
+BACKEND_VENV_DIR="${BACKEND_DIR}/.venv"
+BACKEND_PYTHON_PATH="${BACKEND_VENV_DIR}/bin/python"
 export ROOT_DIR
+export BACKEND_DIR BACKEND_VENV_DIR BACKEND_PYTHON_PATH
 export PATH="${ROOT_DIR}/.bin:${PATH}"
 
 require_commands() {
@@ -27,6 +31,16 @@ setup_backend_dev_env() {
   export APP_WHISPERX_MODEL_CACHE_DIR="${whisperx_cache_dir}"
   export HF_HOME="${hf_home}"
   export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${hf_home}}"
+}
+
+require_backend_python() {
+  if [[ ! -x "${BACKEND_PYTHON_PATH}" ]]; then
+    printf 'backend environment is missing: %s\n' "${BACKEND_PYTHON_PATH}" >&2
+    printf 'run a dedicated backend installer first, for example:\n' >&2
+    printf '  ./scripts/install_backend_linux_cuda.sh\n' >&2
+    printf '  ./scripts/install_backend_wsl_rocm.sh\n' >&2
+    exit 1
+  fi
 }
 
 setup_api_dev_env() {

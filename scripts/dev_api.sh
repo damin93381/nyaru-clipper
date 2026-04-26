@@ -7,5 +7,6 @@ source "${SCRIPT_DIR}/_dev_common.sh"
 
 require_commands uv
 setup_api_dev_env
+require_backend_python
 
-exec uv run --project "${ROOT_DIR}/backend" uvicorn app.main:app --host "${APP_HOST}" --port "${APP_PORT}"
+exec "${BACKEND_PYTHON_PATH}" -m uvicorn app.main:app --host "${APP_HOST}" --port "${APP_PORT}"

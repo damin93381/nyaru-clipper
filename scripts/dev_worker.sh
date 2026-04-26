@@ -7,5 +7,6 @@ source "${SCRIPT_DIR}/_dev_common.sh"
 
 require_commands uv
 setup_backend_dev_env
+require_backend_python
 
-exec uv run --project "${ROOT_DIR}/backend" python -c "from app.worker import worker_loop; worker_loop()"
+exec "${BACKEND_PYTHON_PATH}" -c "from app.worker import worker_loop; worker_loop()"
