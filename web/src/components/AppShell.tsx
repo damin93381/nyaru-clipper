@@ -1,6 +1,16 @@
+import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet } from "react-router-dom";
 
+import { getRuntimeCapabilities } from "../lib/api";
+import { EnvironmentStatusCard } from "./EnvironmentStatusCard";
+
 export function AppShell() {
+  const runtimeCapabilitiesQuery = useQuery({
+    queryKey: ["runtime-capabilities"],
+    queryFn: getRuntimeCapabilities,
+    staleTime: 60_000,
+  });
+
   return (
     <div className="app-shell">
       <header className="app-shell__header">
@@ -18,15 +28,23 @@ export function AppShell() {
       </header>
 
       <div className="app-shell__body">
-        <aside className="panel reserved-panel" aria-label="Future task list region">
-          <p className="eyebrow">Reserved region</p>
-          <h2>Future task list</h2>
-          <p>Leave room here for history, queue visibility, and later batch/subscription views.</p>
-          <ul className="placeholder-list">
-            <li>Active queue snapshot</li>
-            <li>Recent task history</li>
-            <li>Task filters and search</li>
-          </ul>
+        <aside className="app-shell__rail" aria-label="Environment and future task list region">
+          <EnvironmentStatusCard
+            capabilities={runtimeCapabilitiesQuery.data}
+            errorMessage={runtimeCapabilitiesQuery.error instanceof Error ? runtimeCapabilitiesQuery.error.message : null}
+            isLoading={runtimeCapabilitiesQuery.isLoading}
+          />
+
+          <section className="panel reserved-panel" aria-label="Future task list region">
+            <p className="eyebrow">Reserved region</p>
+            <h2>Future task list</h2>
+            <p>Leave room here for history, queue visibility, and later batch/subscription views.</p>
+            <ul className="placeholder-list">
+              <li>Active queue snapshot</li>
+              <li>Recent task history</li>
+              <li>Task filters and search</li>
+            </ul>
+          </section>
         </aside>
 
         <main className="app-shell__main">
