@@ -167,6 +167,41 @@ pnpm --dir web install --frozen-lockfile
 
 如果这个命令失败，不要继续启动运行时，先修复 mismatch。
 
+### `hip_build_no_device` 的 WSL 专项修复
+
+如果 `./scripts/check_wsl_rocm.sh` 报告 `hip_build_no_device`，不要立刻认定是后端装错了 torch wheel。在 WSL 主机上，即使满足下面这些条件，也仍然可能出现这个失败：
+
+- `torch.build_family=rocm`
+- `torch.version.hip` 已经有值
+- `rocminfo` 已经能看到 AMD GPU
+
+AMD 官方的 WSL PyTorch 指南给出了一条 WSL 专项修复路径：把 torch 自带的 `libhsa-runtime64.so` 替换成系统 ROCm 提供的 `/opt/rocm/lib/libhsa-runtime64.so`。
+
+在 WSL 内、并且已经完成专用后端环境安装的前提下，从仓库根目录执行：
+
+```bash
+cp backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so \
+  backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so.pre-amd-wsl
+
+cp /opt/rocm/lib/libhsa-runtime64.so \
+  backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so
+```
+
+然后重新执行：
+
+```bash
+./scripts/check_wsl_rocm.sh
+```
+
+在本仓库已经验证过的主机上，这个替换会把 doctor 结果从 `hip_build_no_device` 变成：
+
+- `detected_profile=wsl-rocm`
+- `torch.cuda.is_available=True`
+- `torch.cuda.device_count=1`
+- `WSL_ROCM_READY`
+
+如果替换之后 doctor 仍然失败，请先收集 `rocminfo` 和 `python -m torch.utils.collect_env` 的输出，再回头修改项目代码。
+
 ### 3. 用共用入口启动运行时
 
 WSL 继续复用和 Linux + CUDA 主路径相同的运行时启动入口：
@@ -227,6 +262,16 @@ PY
 - `wrong_torch_build_cuda_on_wsl`：已经识别到 WSL，但后端环境里还是 CUDA 版 torch。重新执行 `./scripts/install_backend_wsl_rocm.sh`。
 - `cpu_only_torch_on_wsl`：已经识别到 WSL，但后端环境里是 CPU-only torch。重新执行 `./scripts/install_backend_wsl_rocm.sh`。
 - `hip_build_no_device`：已经装了 ROCm torch，但 `torch.cuda` 仍然看不到 AMD GPU。先修复 WSL ROCm 栈，再重试。
+
+遇到 `hip_build_no_device` 时，建议先执行以下运维检查：
+
+```bash
+rocminfo
+ls -l /dev/dxg /dev/kfd
+/home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m torch.utils.collect_env
+```
+
+如果 `rocminfo` 已经能看到 GPU，但 torch 仍然不可用，请先应用上面的 `libhsa-runtime64.so` 替换，再判断主机是否真的不受支持。
 
 ## pip 兼容路径
 

@@ -167,6 +167,41 @@ Expected success output includes:
 
 If this command fails, do not continue into runtime startup until the mismatch is fixed.
 
+### WSL-specific remediation for `hip_build_no_device`
+
+If `./scripts/check_wsl_rocm.sh` reports `hip_build_no_device`, do not immediately assume the backend installed the wrong torch wheel. A WSL host can still fail this check even when:
+
+- `torch.build_family=rocm`
+- `torch.version.hip` is populated
+- `rocminfo` can already see the AMD GPU
+
+The AMD WSL PyTorch guidance documents one WSL-specific remediation: replace the torch-bundled `libhsa-runtime64.so` with the system ROCm runtime from `/opt/rocm/lib`.
+
+From the repo root inside WSL, with the dedicated backend environment already installed:
+
+```bash
+cp backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so \
+  backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so.pre-amd-wsl
+
+cp /opt/rocm/lib/libhsa-runtime64.so \
+  backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so
+```
+
+Then rerun:
+
+```bash
+./scripts/check_wsl_rocm.sh
+```
+
+On the host validated for this repository, that replacement changed the doctor result from `hip_build_no_device` to:
+
+- `detected_profile=wsl-rocm`
+- `torch.cuda.is_available=True`
+- `torch.cuda.device_count=1`
+- `WSL_ROCM_READY`
+
+If the doctor still fails after this replacement, collect both `rocminfo` and `python -m torch.utils.collect_env` before changing project code again.
+
 ### 3. Start the runtime with the shared entrypoints
 
 WSL keeps the same runtime launch path as the Linux + CUDA host workflow:
@@ -227,6 +262,16 @@ If startup succeeds but the runtime reports a mismatch, treat the host as degrad
 - `wrong_torch_build_cuda_on_wsl`: WSL host detected, but the backend environment still has a CUDA torch build. Reinstall with `./scripts/install_backend_wsl_rocm.sh`.
 - `cpu_only_torch_on_wsl`: WSL host detected, but the backend environment has a CPU-only torch build. Reinstall with `./scripts/install_backend_wsl_rocm.sh`.
 - `hip_build_no_device`: ROCm torch is installed, but `torch.cuda` still cannot expose an AMD GPU. Fix the WSL ROCm stack before retrying.
+
+For `hip_build_no_device`, the next operator checks should be:
+
+```bash
+rocminfo
+ls -l /dev/dxg /dev/kfd
+/home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m torch.utils.collect_env
+```
+
+If `rocminfo` already sees the GPU but torch does not, apply the `libhsa-runtime64.so` replacement above before concluding the host is unsupported.
 
 ## pip compatibility path
 

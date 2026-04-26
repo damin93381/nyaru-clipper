@@ -229,6 +229,37 @@ If the host target is WSL + ROCm, these issue codes are the operator-facing mism
 - `cpu_only_torch_on_wsl`: WSL was detected, but the backend environment contains a CPU-only torch build. Reinstall with `./scripts/install_backend_wsl_rocm.sh`, then rerun `./scripts/check_wsl_rocm.sh`.
 - `hip_build_no_device`: ROCm torch is installed, but `torch.cuda` still cannot expose a GPU device. Fix the WSL ROCm stack, then rerun `./scripts/check_wsl_rocm.sh`.
 
+For `hip_build_no_device`, the first operator checks should be:
+
+```bash
+rocminfo
+ls -l /dev/dxg /dev/kfd
+/home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m torch.utils.collect_env
+```
+
+One WSL-specific failure mode is that `rocminfo` already sees the AMD GPU, but torch still cannot open it. In that case, apply the AMD-documented HSA runtime replacement inside the dedicated backend environment:
+
+```bash
+cp backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so \
+  backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so.pre-amd-wsl
+
+cp /opt/rocm/lib/libhsa-runtime64.so \
+  backend/.venv/lib/python3.11/site-packages/torch/lib/libhsa-runtime64.so
+```
+
+Then rerun:
+
+```bash
+./scripts/check_wsl_rocm.sh
+```
+
+On the host validated for this repository, that replacement moved the doctor result from `hip_build_no_device` to a healthy WSL ROCm state with:
+
+- `detected_profile=wsl-rocm`
+- `torch.cuda.is_available=True`
+- `torch.cuda.device_count=1`
+- `WSL_ROCM_READY`
+
 These codes should line up across API responses, the UI environment status card, the API startup log, and worker preflight logs.
 
 ## Logs and troubleshooting
