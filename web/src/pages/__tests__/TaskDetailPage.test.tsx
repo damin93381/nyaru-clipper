@@ -1,10 +1,10 @@
-import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-import { TaskDetailPage, getPollingInterval } from "../TaskDetailPage";
 import { getTaskArtifacts, getTaskDetail, getTaskLogs, getTaskStages } from "../../lib/api";
 import type { ArtifactRecord, StageLogSummary, TaskDetail, TaskStageRecord } from "../../lib/types";
+import { getPollingInterval, TaskDetailPage } from "../TaskDetailPage";
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
@@ -88,21 +88,29 @@ describe("TaskDetailPage", () => {
 
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: /task task-fixture123/i })).toBeInTheDocument();
-    expect(screen.getByText(/translation stage failed/i)).toBeInTheDocument();
-    expect(screen.getByText(/retry-ready from translation/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "任务 task-fixture123" })).toBeInTheDocument();
+    const failurePanel = screen.getByText("可读失败摘要").closest(".panel");
+    expect(failurePanel).not.toBeNull();
+    expect(within(failurePanel as HTMLElement).getByRole("heading", { name: "翻译阶段失败" })).toBeInTheDocument();
+    expect(within(failurePanel as HTMLElement).getByText("翻译失败")).toBeInTheDocument();
+    expect(
+      screen.getByText("可从 翻译 重新尝试。上游已成功阶段保持不变，下游阶段继续等待。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("每 15 秒轮询")).toBeInTheDocument();
+    expect(screen.getByText("Downloaded source video via bbdown")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "产物概览" })).toBeInTheDocument();
     expect(screen.getByText(/bilingual_transcript_json/i)).toBeInTheDocument();
 
     for (const stageName of [
-      "ingest",
-      "media_prep",
-      "asr",
-      "translation",
-      "highlight",
-      "export",
-      "report",
+      "采集",
+      "媒体准备",
+      "语音转写",
+      "翻译",
+      "高光",
+      "导出",
+      "报告",
     ]) {
-      expect(screen.getByRole("heading", { level: 4, name: new RegExp(stageName, "i") })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 4, name: stageName })).toBeInTheDocument();
     }
   });
 

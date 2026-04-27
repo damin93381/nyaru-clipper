@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { WorkspacePage } from "../WorkspacePage";
 import { exportTaskClip, fetchArtifactJson } from "../../lib/api";
 import type { ArtifactRecord } from "../../lib/types";
+import { WorkspacePage } from "../WorkspacePage";
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
@@ -126,15 +126,21 @@ describe("WorkspacePage", () => {
 
     renderPage(baseArtifacts);
 
+    expect(await screen.findByRole("heading", { name: "字幕审阅与高光确认" })).toBeInTheDocument();
+    expect(screen.getByText("任务 task-workspace123 工作区")).toBeInTheDocument();
     expect(await screen.findByText(/seg-0001/i)).toBeInTheDocument();
     expect(screen.getByText("你好")).toBeInTheDocument();
     expect(screen.getByText("こんにちは")).toBeInTheDocument();
-    expect(screen.getByText(/laughter phrase/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /download bilingual subtitles/i })).toHaveAttribute(
+    expect(screen.getByText(/笑声片段/i)).toBeInTheDocument();
+    expect(screen.getByText(/强调标点/i)).toBeInTheDocument();
+    expect(screen.getByText("开始（秒）")).toBeInTheDocument();
+    expect(screen.getByText("结束（秒）")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认导出" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^下载双语字幕$/ })).toHaveAttribute(
       "href",
       "http://127.0.0.1:8000/api/tasks/task-workspace123/artifacts/3/content/subtitles.zh-ja.srt",
     );
-    expect(screen.getByRole("link", { name: /download task report/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /下载任务报告/i })).toHaveAttribute(
       "href",
       "http://127.0.0.1:8000/api/tasks/task-workspace123/artifacts/5/content/task-report.md",
     );
@@ -158,7 +164,7 @@ describe("WorkspacePage", () => {
     });
 
     expect(await screen.findByText(/clip-00015500-00045000\.mp4/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /download exported clip/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "下载已导出片段" })).toHaveAttribute(
       "href",
       "http://127.0.0.1:8000/api/tasks/task-workspace123/artifacts/99/content/clip-00015500-00045000.mp4",
     );
@@ -195,11 +201,12 @@ describe("WorkspacePage", () => {
 
     renderPage(baseArtifacts);
 
+    expect(await screen.findByText("暂无可用高光候选")).toBeInTheDocument();
     expect(
       await screen.findByText(/no highlight candidates cleared the minimum score threshold/i),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("candidate-confirm-button")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /download bilingual subtitles/i })).toBeVisible();
-    expect(screen.getByRole("link", { name: /download task report/i })).toBeVisible();
+    expect(screen.getByRole("link", { name: /^下载双语字幕$/ })).toBeVisible();
+    expect(screen.getByRole("link", { name: "下载任务报告" })).toBeVisible();
   });
 });

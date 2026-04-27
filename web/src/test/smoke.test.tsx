@@ -79,10 +79,12 @@ describe("workspace smoke", () => {
 
     renderShell();
 
-    expect(await screen.findByRole("heading", { name: /bilibili vtuber suite/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Bilibili VTuber 工作台" })).toBeInTheDocument();
     expect(await screen.findByTestId("environment-status-card")).toBeInTheDocument();
     expect(await screen.findByText(/gpu runtime was not detected/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /queue a bilibili vod for the canonical workstation pipeline/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "将 Bilibili 录播加入标准工作流水线" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the main task view available when capability fetching fails", async () => {
@@ -90,9 +92,14 @@ describe("workspace smoke", () => {
 
     renderShell();
 
-    expect(await screen.findByRole("heading", { name: /bilibili vtuber suite/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Bilibili VTuber 工作台" })).toBeInTheDocument();
     expect(await screen.findByTestId("environment-status-card")).toBeInTheDocument();
-    expect(await screen.findByText(/runtime capability checks are temporarily unavailable/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /queue a bilibili vod for the canonical workstation pipeline/i })).toBeInTheDocument();
+    expect(
+      await screen.findByText("运行能力检查暂时不可用。任务界面仍可继续使用，系统稍后会再次重试。"),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("runtime endpoint unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "将 Bilibili 录播加入标准工作流水线" }),
+    ).toBeInTheDocument();
   });
 });

@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 
-import { NewTaskPage } from "../NewTaskPage";
 import { createTask } from "../../lib/api";
+import { NewTaskPage } from "../NewTaskPage";
 
 const mockNavigate = vi.fn();
 
@@ -45,11 +45,15 @@ describe("NewTaskPage", () => {
   it("renders the source input, submit action, and reserved option toggles", () => {
     renderPage();
 
+    expect(screen.getByRole("heading", { name: "创建任务" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Bilibili 录播链接")).toBeInTheDocument();
     expect(screen.getByTestId("task-url-input")).toBeInTheDocument();
-    expect(screen.getByTestId("task-submit-button")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /translation/i })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /highlight/i })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /export/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建任务" })).toBeInTheDocument();
+    expect(screen.getByTestId("task-submit-button")).toHaveTextContent("创建任务");
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    expect(screen.getByText("翻译")).toBeInTheDocument();
+    expect(screen.getByText("高光")).toBeInTheDocument();
+    expect(screen.getByText("导出")).toBeInTheDocument();
   });
 
   it("submits a valid URL and navigates to the created task detail route", async () => {
