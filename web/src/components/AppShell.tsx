@@ -2,9 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { getRuntimeCapabilities } from "../lib/api";
+import { APP_SHELL_COPY } from "../lib/copy/appShell";
 import { EnvironmentStatusCard } from "./EnvironmentStatusCard";
 
 export function AppShell() {
+  const { header, navigation, sideRail, futureWorkspace } = APP_SHELL_COPY;
   const runtimeCapabilitiesQuery = useQuery({
     queryKey: ["runtime-capabilities"],
     queryFn: getRuntimeCapabilities,
@@ -15,34 +17,34 @@ export function AppShell() {
     <div className="app-shell">
       <header className="app-shell__header">
         <div>
-          <p className="eyebrow">Single-host workstation MVP</p>
-          <h1>Bilibili VTuber Suite</h1>
-          <p className="header-copy">Operational shell for submission, stage tracking, and later review workflows.</p>
+          <p className="eyebrow">{header.eyebrow}</p>
+          <h1>{header.title}</h1>
+          <p className="header-copy">{header.description}</p>
         </div>
 
-        <nav aria-label="Primary" className="app-shell__nav">
+        <nav aria-label={navigation.primaryAriaLabel} className="app-shell__nav">
           <NavLink className="nav-link" to="/">
-            New task
+            {navigation.newTask}
           </NavLink>
         </nav>
       </header>
 
       <div className="app-shell__body">
-        <aside className="app-shell__rail" aria-label="Environment and future task list region">
+        <aside className="app-shell__rail" aria-label={sideRail.ariaLabel}>
           <EnvironmentStatusCard
             capabilities={runtimeCapabilitiesQuery.data}
             errorMessage={runtimeCapabilitiesQuery.error instanceof Error ? runtimeCapabilitiesQuery.error.message : null}
             isLoading={runtimeCapabilitiesQuery.isLoading}
           />
 
-          <section className="panel reserved-panel" aria-label="Future task list region">
-            <p className="eyebrow">Reserved region</p>
-            <h2>Future task list</h2>
-            <p>Leave room here for history, queue visibility, and later batch/subscription views.</p>
+          <section className="panel reserved-panel" aria-label={sideRail.futureTaskList.title}>
+            <p className="eyebrow">{sideRail.futureTaskList.eyebrow}</p>
+            <h2>{sideRail.futureTaskList.title}</h2>
+            <p>{sideRail.futureTaskList.description}</p>
             <ul className="placeholder-list">
-              <li>Active queue snapshot</li>
-              <li>Recent task history</li>
-              <li>Task filters and search</li>
+              <li>{sideRail.futureTaskList.items[0]}</li>
+              <li>{sideRail.futureTaskList.items[1]}</li>
+              <li>{sideRail.futureTaskList.items[2]}</li>
             </ul>
           </section>
         </aside>
@@ -51,14 +53,14 @@ export function AppShell() {
           <Outlet />
         </main>
 
-        <aside className="panel reserved-panel" aria-label="Future workspace region">
-          <p className="eyebrow">Reserved region</p>
-          <h2>Future workspace</h2>
-          <p>Subtitle review, candidate confirmation, and exports will expand into this column in Task 10.</p>
+        <aside className="panel reserved-panel" aria-label={futureWorkspace.ariaLabel}>
+          <p className="eyebrow">{futureWorkspace.eyebrow}</p>
+          <h2>{futureWorkspace.title}</h2>
+          <p>{futureWorkspace.description}</p>
           <ul className="placeholder-list">
-            <li>Bilingual subtitle review</li>
-            <li>Highlight candidate controls</li>
-            <li>Artifact download shortcuts</li>
+            <li>{futureWorkspace.items[0]}</li>
+            <li>{futureWorkspace.items[1]}</li>
+            <li>{futureWorkspace.items[2]}</li>
           </ul>
         </aside>
       </div>
