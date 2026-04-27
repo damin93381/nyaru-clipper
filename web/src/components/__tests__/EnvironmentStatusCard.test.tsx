@@ -113,23 +113,28 @@ describe("EnvironmentStatusCard", () => {
   it("renders a healthy runtime snapshot with a satisfied full-function profile signal", () => {
     render(<EnvironmentStatusCard capabilities={healthyCapabilities} />);
 
-    expect(screen.getByRole("heading", { name: /environment status/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "环境状态" })).toBeInTheDocument();
     expect(screen.getByTestId("environment-status-card")).toHaveClass("environment-status-card--healthy");
-    expect(screen.getByText("Healthy")).toBeInTheDocument();
+    expect(screen.getByText("正常")).toBeInTheDocument();
     expect(screen.getByText("wsl-rocm")).toBeInTheDocument();
-    expect(screen.getByText("Satisfied")).toBeInTheDocument();
-    expect(screen.getByText(/runtime checks report the expected full-function profile/i)).toBeInTheDocument();
-    expect(screen.queryByText(/active warnings/i)).not.toBeInTheDocument();
+    expect(screen.getByText("已满足")).toBeInTheDocument();
+    expect(screen.getByText("运行时检查表明当前工作站已满足预期的完整功能配置。")).toBeInTheDocument();
+    expect(screen.getByText("当前运行配置可使用 GPU 加速处理。")).toBeInTheDocument();
+    expect(screen.getByText("当前配置")).toBeInTheDocument();
+    expect(screen.getByText("加速能力")).toBeInTheDocument();
+    expect(screen.queryByText("当前警告")).not.toBeInTheDocument();
   });
 
   it("renders warning-only capability gaps without hiding the warning details", () => {
     render(<EnvironmentStatusCard capabilities={warningCapabilities} />);
 
     expect(screen.getByTestId("environment-status-card")).toHaveClass("environment-status-card--warning");
-    expect(screen.getByText("Warning")).toBeInTheDocument();
+    expect(screen.getByText("警告")).toBeInTheDocument();
     expect(screen.getByText("cpu-only")).toBeInTheDocument();
-    expect(screen.getByText("Needs attention")).toBeInTheDocument();
-    expect(screen.getByText(/warnings do not block task submission or task review/i)).toBeInTheDocument();
+    expect(screen.getByText("需要关注")).toBeInTheDocument();
+    expect(screen.getByText("当前环境尚未满足预期的完整功能配置。")).toBeInTheDocument();
+    expect(screen.getByText("这些警告不会阻止任务提交或任务审阅，但可能降低处理能力。")).toBeInTheDocument();
+    expect(screen.getByText("当前警告")).toBeInTheDocument();
     expect(screen.getByText(/gpu runtime was not detected/i)).toBeInTheDocument();
   });
 
@@ -137,16 +142,17 @@ describe("EnvironmentStatusCard", () => {
     render(<EnvironmentStatusCard capabilities={wslCudaMismatchCapabilities} />);
 
     expect(screen.getByTestId("environment-status-card")).toHaveClass("environment-status-card--danger");
-    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.getByText("错误")).toBeInTheDocument();
     expect(
-      screen.getByText("This WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm runtime."),
+      screen.getByText("当前 WSL 主机正在使用 CUDA 构建的 torch wheel，而不是专用的 ROCm 运行环境。"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Use the dedicated WSL ROCm backend environment so startup stays non-blocking while operators still see the exact wheel mismatch.",
+        "请切换到专用的 WSL ROCm 后端环境，以保持启动流程非阻塞，并让操作人员看到准确的 wheel 不匹配信息。",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("No accelerator detected · torch cuda build")).toBeInTheDocument();
+    expect(screen.getByText("未检测到可用加速设备 · torch cuda 构建")).toBeInTheDocument();
+    expect(screen.getByText("已检测问题")).toBeInTheDocument();
     expect(
       screen.getByText("WSL host is using a CUDA-built torch wheel instead of the dedicated ROCm build."),
     ).toBeInTheDocument();
