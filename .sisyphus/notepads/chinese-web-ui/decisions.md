@@ -1,0 +1,2 @@
+- Chose `glossary.ts` as the single source of truth for repeated Chinese terms, task status labels, stage labels, known reason-code labels, known summary labels, environment badges, and shared fallback strings from the plan glossary.
+- Kept `web/src/App.tsx` and `web/src/router.tsx` untouched and limited this task to copy-module creation plus barrel exports, so downstream UI refactors remain incremental and low-risk.

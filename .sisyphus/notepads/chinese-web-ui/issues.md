@@ -1,0 +1,4 @@
+- No blocking issues encountered for Task 1. Existing frontend architecture had no prior copy-layer pattern, so the new `web/src/lib/copy/` directory establishes the convention for later tasks.
+- `pnpm --dir web test --run src/components/__tests__/EnvironmentStatusCard.test.tsx` currently fails because the existing assertions still expect English environment-status chrome (`Environment status`, `Healthy`, `Warning`, `Error`, `Satisfied`, `Needs attention`) after the component was switched to centralized Chinese copy; the raw backend issue payload text still renders unchanged as intended.
+
+- Task 5 verification initially exposed assertion collisions caused by broader Chinese label families (`导出`, duplicated `翻译失败`, and `下载双语字幕` vs `下载双语字幕 JSON`); the fix was to tighten test selectors rather than change production copy or backend fixtures.
