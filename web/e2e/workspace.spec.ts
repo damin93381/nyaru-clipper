@@ -190,16 +190,24 @@ test("confirms a candidate export and surfaces the downloadable clip card @expor
 
   await page.goto(`/tasks/${taskId}`);
 
+  await expect(page.getByRole("heading", { level: 2, name: `任务 ${taskId}` })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "字幕审阅与高光确认" })).toBeVisible();
+  await expect(page.getByText(`任务 ${taskId} 工作区`)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 4, name: "中文字幕与双语字幕行" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 4, name: "排名候选确认" })).toBeVisible();
   await expect(page.getByText(/seg-0001/i)).toBeVisible();
   await expect(page.getByText("こんにちは")).toBeVisible();
-  await expect(page.getByRole("link", { name: /download bilingual subtitles/i })).toBeVisible();
+  await expect(page.getByText("开始（秒）")).toBeVisible();
+  await expect(page.getByText("结束（秒）")).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认导出" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载双语字幕", exact: true })).toBeVisible();
 
   await page.getByTestId("candidate-start-input").fill("15.5");
   await page.getByTestId("candidate-end-input").fill("45");
   await page.getByTestId("candidate-confirm-button").click();
 
   await expect(page.getByText(/clip-00015500-00045000\.mp4/i)).toBeVisible();
-  await expect(page.getByRole("link", { name: /download exported clip/i })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "下载已导出片段" })).toHaveAttribute(
     "href",
     `http://127.0.0.1:8000${artifactPath(taskId, 99, "clip-00015500-00045000.mp4")}`,
   );
@@ -294,9 +302,11 @@ test("shows zero-candidate state while preserving subtitle and report downloads 
 
   await page.goto(`/tasks/${taskId}`);
 
-  await expect(page.getByRole("heading", { name: /no highlight candidates available/i })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: `任务 ${taskId}` })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "字幕审阅与高光确认" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 4, name: "暂无可用高光候选" })).toBeVisible();
   await expect(page.getByText(/no highlight candidates cleared the minimum score threshold/i).first()).toBeVisible();
-  await expect(page.getByRole("link", { name: /download bilingual subtitles/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: /download task report/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载双语字幕", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载任务报告" })).toBeVisible();
   await expect(page.getByTestId("candidate-confirm-button")).toHaveCount(0);
 });

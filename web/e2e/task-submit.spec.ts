@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const stageHeadings = ["采集", "媒体准备", "语音转写", "翻译", "高光", "导出", "报告"];
+
 const stages = [
   { name: "ingest", status: "pending", summary: null, attempts: 0 },
   { name: "media_prep", status: "pending", summary: null, attempts: 0 },
@@ -80,13 +82,21 @@ test("submits a task and lands on the canonical detail page @happy", async ({ pa
 
   await page.goto("/");
 
+  await expect(page.getByRole("heading", { level: 1, name: "Bilibili VTuber 工作台" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "新建任务" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "将 Bilibili 录播加入标准工作流水线" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "创建任务" })).toBeVisible();
+  await expect(page.getByLabel("Bilibili 录播链接")).toBeVisible();
+  await expect(page.getByRole("button", { name: "创建任务" })).toBeVisible();
+
   await page.getByTestId("task-url-input").fill("https://www.bilibili.com/video/BV1xx411c7mD");
   await page.getByTestId("task-submit-button").click();
 
   await expect(page).toHaveURL(/\/tasks\/task-happy123$/);
-  await expect(page.getByRole("heading", { name: /task task-happy123/i })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "任务 task-happy123" })).toBeVisible();
+  await expect(page.getByText("运行中")).toBeVisible();
 
-  for (const stageName of ["ingest", "media_prep", "asr", "translation", "highlight", "export", "report"]) {
-    await expect(page.getByRole("heading", { level: 4, name: new RegExp(stageName, "i") })).toBeVisible();
+  for (const stageName of stageHeadings) {
+    await expect(page.getByRole("heading", { level: 4, name: stageName })).toBeVisible();
   }
 });

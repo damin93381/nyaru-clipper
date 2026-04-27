@@ -68,9 +68,13 @@ test("renders a readable translation failure summary and retry-ready state @tran
 
   await page.goto("/tasks/task-failed123");
 
-  await expect(page.getByRole("heading", { name: /task task-failed123/i })).toBeVisible();
-  await expect(page.getByText(/translation stage failed/i)).toBeVisible();
-  await expect(page.getByText(/retry-ready from translation/i)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Bilibili VTuber 工作台" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "任务 task-failed123" })).toBeVisible();
+  await expect(page.getByText("可读失败摘要")).toBeVisible();
+  await expect(page.getByText("翻译阶段失败")).toBeVisible();
+  await expect(page.getByText("可从 翻译 重新尝试。上游已成功阶段保持不变，下游阶段继续等待。")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "阶段时间线" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "产物概览" })).toBeVisible();
   await expect(page.getByText(/bilingual_transcript_json/i)).toBeVisible();
   await expect(page.getByText(/fixture-translator/i)).toBeVisible();
 });

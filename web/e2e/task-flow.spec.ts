@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const stageHeadings = ["采集", "媒体准备", "语音转写", "翻译", "高光", "导出", "报告"];
+
 const pendingStages = [
   { name: "ingest", status: "pending", summary: null, attempts: 0 },
   { name: "media_prep", status: "pending", summary: null, attempts: 0 },
@@ -255,24 +257,40 @@ test("submits a task, lands on the canonical detail page, and completes workspac
 
   await page.goto("/");
 
+  await expect(page.getByRole("heading", { level: 1, name: "Bilibili VTuber 工作台" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "新建任务" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "将 Bilibili 录播加入标准工作流水线" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "创建任务" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "创建任务" })).toBeVisible();
+
   await page.getByTestId("task-url-input").fill("https://www.bilibili.com/video/BV1flowhappy123");
   await page.getByTestId("task-submit-button").click();
 
   await expect(page).toHaveURL(new RegExp(`/tasks/${taskId}$`));
-  await expect(page.getByRole("heading", { name: new RegExp(`task ${taskId}`, "i") })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: `任务 ${taskId}` })).toBeVisible();
+  await expect(page.getByText("任务详情")).toBeVisible();
 
-  for (const stageName of ["ingest", "media_prep", "asr", "translation", "highlight", "export", "report"]) {
-    await expect(page.getByRole("heading", { level: 4, name: new RegExp(stageName, "i") })).toBeVisible();
+  for (const stageName of stageHeadings) {
+    await expect(page.getByRole("heading", { level: 4, name: stageName })).toBeVisible();
   }
 
+  await expect(page.getByRole("heading", { level: 3, name: "字幕审阅与高光确认" })).toBeVisible();
+  await expect(page.getByText(`任务 ${taskId} 工作区`)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 4, name: "中文字幕与双语字幕行" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 4, name: "排名候选确认" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 4, name: "产物下载" })).toBeVisible();
   await expect(page.getByText(/seg-0001/i)).toBeVisible();
   await expect(page.getByText("こんにちは")).toBeVisible();
-  await expect(page.getByText(/laughter phrase/i)).toBeVisible();
-  await expect(page.getByRole("link", { name: /download bilingual subtitles/i })).toHaveAttribute(
+  await expect(page.getByText("笑声片段")).toBeVisible();
+  await expect(page.getByText("强调标点")).toBeVisible();
+  await expect(page.getByText("开始（秒）")).toBeVisible();
+  await expect(page.getByText("结束（秒）")).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认导出" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载双语字幕", exact: true })).toHaveAttribute(
     "href",
     `http://127.0.0.1:8000${artifactPath(taskId, 3, "subtitles.zh-ja.srt")}`,
   );
-  await expect(page.getByRole("link", { name: /download task report/i })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "下载任务报告" })).toHaveAttribute(
     "href",
     `http://127.0.0.1:8000${artifactPath(taskId, 5, "task-report.md")}`,
   );
@@ -287,7 +305,7 @@ test("submits a task, lands on the canonical detail page, and completes workspac
     end_s: 45,
   });
   await expect(page.getByText(/clip-00015500-00045000\.mp4/i)).toBeVisible();
-  await expect(page.getByRole("link", { name: /download exported clip/i })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "下载已导出片段" })).toHaveAttribute(
     "href",
     `http://127.0.0.1:8000${artifactPath(taskId, 99, "clip-00015500-00045000.mp4")}`,
   );
@@ -356,14 +374,15 @@ test("renders the translation-failed detail state with deterministic evidence fi
 
   await page.goto(`/tasks/${taskId}`);
 
-  await expect(page.getByRole("heading", { name: new RegExp(`task ${taskId}`, "i") })).toBeVisible();
-  await expect(page.getByText(/translation stage failed/i)).toBeVisible();
-  await expect(page.getByText(/retry-ready from translation/i)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: `任务 ${taskId}` })).toBeVisible();
+  await expect(page.getByText("翻译阶段失败")).toBeVisible();
+  await expect(page.getByText("可从 翻译 重新尝试。上游已成功阶段保持不变，下游阶段继续等待。")).toBeVisible();
   await expect(page.getByText(/bilingual_transcript_json/i)).toBeVisible();
   await expect(page.getByText(/fixture-translator/i)).toBeVisible();
   await expect(page.getByText(/seg-fail-0001/i)).toBeVisible();
   await expect(page.getByText("翻訳失敗前の保持字幕。")).toBeVisible();
-  await expect(page.getByRole("link", { name: /download bilingual subtitles/i })).toHaveAttribute(
+  await expect(page.getByRole("heading", { level: 3, name: "字幕审阅与高光确认" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载双语字幕", exact: true })).toHaveAttribute(
     "href",
     `http://127.0.0.1:8000${artifactPath(taskId, 2, "subtitles.zh-ja.srt")}`,
   );
