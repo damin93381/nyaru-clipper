@@ -5,6 +5,7 @@ import mimetypes
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
+from typing import Literal
 from sqlmodel import Session
 
 from app.db import get_session
@@ -12,13 +13,16 @@ from app.repositories.tasks import (
     create_task,
     get_task_artifact,
     get_task_detail,
+    get_task_record,
     list_task_artifacts,
     list_task_log_summaries,
     list_task_stages,
     retry_task_from_stage,
 )
 from app.services.clip_export import ClipExportFailure, export_confirmed_clip
+from app.services.asr_whisperx import download_asr_missing_models
 from app.services.storage import build_artifact_content_path, resolve_task_artifact_path
+from app.settings import get_settings
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -29,6 +33,10 @@ class CreateTaskRequest(BaseModel):
 
 class RetryTaskRequest(BaseModel):
     stage_name: str
+
+
+class DownloadAsrModelsRequest(BaseModel):
+    model_keys: list[Literal["whisperx", "alignment"]]
 
 
 class ExportClipRequest(BaseModel):
@@ -113,6 +121,23 @@ def task_retry_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     session.commit()
     return retry_result
+
+
+@router.post("/{task_id}/asr/models/download", status_code=status.HTTP_202_ACCEPTED)
+def task_asr_model_download_endpoint(
+    task_id: str,
+    payload: DownloadAsrModelsRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    record = get_task_record(session, task_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    asr_stage = next((stage for stage in record.stages if stage.name == "asr"), None)
+    if record.task.status != "failed" or asr_stage is None or asr_stage.status != "failed" or asr_stage.summary != "missing_model":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ASR task is not awaiting missing-model recovery")
+
+    return download_asr_missing_models(get_settings(), requested_keys=payload.model_keys)
 
 
 @router.post("/{task_id}/clips", status_code=status.HTTP_201_CREATED)

@@ -56,6 +56,20 @@ def _serialize_artifact(artifact: Artifact) -> dict[str, Any]:
     }
 
 
+def _serialize_failure_recovery(task: Task, stages: list[TaskStage]) -> dict[str, Any] | None:
+    if task.status != "failed":
+        return None
+
+    asr_stage = next((stage for stage in stages if stage.name == "asr"), None)
+    if asr_stage is None or asr_stage.status != "failed" or asr_stage.summary != "missing_model":
+        return None
+
+    from app.services.asr_whisperx import build_asr_missing_model_recovery
+    from app.settings import get_settings
+
+    return build_asr_missing_model_recovery(get_settings())
+
+
 def _task_to_response(task: Task, stages: list[TaskStage], *, created: bool | None = None) -> dict[str, Any]:
     payload = {
         "task_id": task.id,
@@ -65,6 +79,9 @@ def _task_to_response(task: Task, stages: list[TaskStage], *, created: bool | No
         "status": task.status,
         "stages": [_serialize_stage(stage) for stage in stages],
     }
+    failure_recovery = _serialize_failure_recovery(task, stages)
+    if failure_recovery is not None:
+        payload["failure_recovery"] = failure_recovery
     if created is not None:
         payload["created"] = created
     return payload
