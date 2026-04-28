@@ -6,7 +6,6 @@ import type {
   ClipExportPayload,
   ClipExportResponse,
   CreateTaskPayload,
-  RuntimeCapabilities,
   StageLogSummary,
   TaskDetail,
   TaskStageRecord,
@@ -111,9 +110,6 @@ export function downloadAsrModels(
   );
 }
 
-export function getRuntimeCapabilities(): Promise<RuntimeCapabilities> {
-  return request<RuntimeCapabilities>("/runtime/capabilities");
-}
 export async function fetchArtifactJson<T>(path: string): Promise<T> {
   const response = await fetch(resolveArtifactUrl(path), {
     headers: {
