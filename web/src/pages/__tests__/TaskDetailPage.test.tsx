@@ -2,20 +2,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-import { TaskDetailPage, getPollingInterval } from "../TaskDetailPage";
-import {
-  downloadAsrModels,
-  getTaskArtifacts,
-  getTaskDetail,
-  getTaskLogs,
-  getTaskStages,
-} from "../../lib/api";
-import type {
-  ArtifactRecord,
-  StageLogSummary,
-  TaskDetail,
-  TaskStageRecord,
-} from "../../lib/types";
+import { downloadAsrModels, getTaskArtifacts, getTaskDetail, getTaskLogs, getTaskStages } from "../../lib/api";
+import type { ArtifactRecord, StageLogSummary, TaskDetail, TaskStageRecord } from "../../lib/types";
+import { getPollingInterval, TaskDetailPage } from "../TaskDetailPage";
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
@@ -119,11 +108,7 @@ describe("TaskDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
-    vi.mocked(downloadAsrModels).mockResolvedValue({
-      stage: "asr",
-      kind: "missing_model",
-      models: [],
-    });
+    vi.mocked(downloadAsrModels).mockResolvedValue({ stage: "asr", kind: "missing_model", models: [] });
     vi.mocked(getTaskStages).mockResolvedValue(canonicalStages);
     vi.mocked(getTaskArtifacts).mockResolvedValue(artifacts);
     vi.mocked(getTaskLogs).mockResolvedValue(failureLogs);
@@ -139,15 +124,7 @@ describe("TaskDetailPage", () => {
     expect(screen.getByText(/retry-ready from translation/i)).toBeInTheDocument();
     expect(screen.getByText(/bilingual_transcript_json/i)).toBeInTheDocument();
 
-    for (const stageName of [
-      "ingest",
-      "media_prep",
-      "asr",
-      "translation",
-      "highlight",
-      "export",
-      "report",
-    ]) {
+    for (const stageName of ["ingest", "media_prep", "asr", "translation", "highlight", "export", "report"]) {
       expect(screen.getByRole("heading", { level: 4, name: new RegExp(stageName, "i") })).toBeInTheDocument();
     }
   });
