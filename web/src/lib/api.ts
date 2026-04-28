@@ -1,5 +1,8 @@
 import type {
+  DownloadAsrModelsPayload,
+  DownloadAsrModelsResponse,
   ArtifactRecord,
+  AsrMissingModelKey,
   ClipExportPayload,
   ClipExportResponse,
   CreateTaskPayload,
@@ -89,6 +92,23 @@ export function exportTaskClip(taskId: string, payload: ClipExportPayload): Prom
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function downloadAsrModels(
+  taskId: string,
+  modelKeys: AsrMissingModelKey[],
+): Promise<DownloadAsrModelsResponse> {
+  const payload: DownloadAsrModelsPayload = {
+    model_keys: modelKeys,
+  };
+
+  return request<DownloadAsrModelsResponse>(
+    `/tasks/${taskId}/asr/models/download`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function getRuntimeCapabilities(): Promise<RuntimeCapabilities> {

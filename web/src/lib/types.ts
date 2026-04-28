@@ -38,11 +38,41 @@ export interface TaskDetail {
 	source_video_id: string | null;
 	status: TaskStatus;
 	stages: TaskStageRecord[];
+	failure_recovery?: AsrMissingModelRecovery;
 	created?: boolean;
 }
 
 export interface CreateTaskPayload {
 	source_url: string;
+}
+
+export type AsrMissingModelKey = "whisperx" | "alignment";
+export type AsrMissingModelStatus = "missing" | "ready" | "downloaded";
+
+export interface AsrMissingModelDescriptor {
+	key: AsrMissingModelKey;
+	label: string;
+	status: AsrMissingModelStatus;
+	target_dir: string;
+	repo_id: string;
+	download_supported: boolean;
+}
+
+export interface AsrMissingModelRecovery {
+	stage: "asr";
+	kind: "missing_model";
+	message: string;
+	models: AsrMissingModelDescriptor[];
+}
+
+export interface DownloadAsrModelsPayload {
+	model_keys: AsrMissingModelKey[];
+}
+
+export interface DownloadAsrModelsResponse {
+	stage: "asr";
+	kind: "missing_model";
+	models: AsrMissingModelDescriptor[];
 }
 
 export interface ArtifactRecord {

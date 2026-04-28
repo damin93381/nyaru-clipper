@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as api from "../api";
 import { fetchArtifactJson, getRuntimeCapabilities } from "../api";
 
 describe("fetchArtifactJson", () => {
@@ -43,5 +44,34 @@ describe("fetchArtifactJson", () => {
         "Content-Type": "application/json",
       },
     });
+  });
+
+  it("posts requested ASR model keys to the task download endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ stage: "asr", kind: "missing_model", models: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const downloadAsrModels = Reflect.get(api, "downloadAsrModels");
+
+    expect(downloadAsrModels).toBeTypeOf("function");
+
+    if (typeof downloadAsrModels !== "function") {
+      return;
+    }
+
+    await downloadAsrModels("task-models123", ["whisperx", "alignment"]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/tasks/task-models123/asr/models/download",
+      {
+        method: "POST",
+        body: JSON.stringify({ model_keys: ["whisperx", "alignment"] }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
   });
 });

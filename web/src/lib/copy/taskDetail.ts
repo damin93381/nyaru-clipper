@@ -18,6 +18,13 @@ export const TASK_DETAIL_COPY = {
     eyebrow: "可读失败摘要",
     title: (stageLabel: string) => `${stageLabel}阶段失败`,
     recovery: (stageLabel: string) => `可从 ${stageLabel} 重新尝试。上游已成功阶段保持不变，下游阶段继续等待。`,
+    missingModel: {
+      eyebrow: "ASR 模型恢复",
+      title: "缺失模型处理",
+      manualHint: "你也可以按下面目录手动放置模型文件，然后重新触发 ASR 阶段。",
+      downloadIdle: "自动下载缺失模型",
+      downloadPending: "正在下载缺失模型...",
+    },
   },
   timeline: {
     eyebrow: "标准流水线",
