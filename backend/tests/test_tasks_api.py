@@ -216,3 +216,102 @@ def test_worker_claims_only_one_active_gpu_bound_job_at_a_time(client: TestClien
 
     assert claimed_after_completion is not None
     assert claimed_after_completion.task_id == second_task
+
+
+def test_task_detail_failure_recovery_reports_asr_missing_model(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1missingmodel001"},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["task_id"]
+
+    from app.db import session_scope
+    from app.models import Task, TaskStage
+
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.status = "failed"
+        session.add(task)
+
+        asr_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "asr")
+        ).one()
+        asr_stage.status = "failed"
+        asr_stage.summary = "missing_model"
+        session.add(asr_stage)
+
+    detail_response = client.get(f"/api/tasks/{task_id}")
+
+    assert detail_response.status_code == 200
+    body = detail_response.json()
+    assert body["failure_recovery"]["stage"] == "asr"
+    assert body["failure_recovery"]["kind"] == "missing_model"
+    assert [model["key"] for model in body["failure_recovery"]["models"]] == ["whisperx", "alignment"]
+
+
+def test_asr_model_download_returns_accepted_model_status_payload(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1downloadmodels001"},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["task_id"]
+
+    from app.db import session_scope
+    from app.models import Task, TaskStage
+
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.status = "failed"
+        session.add(task)
+
+        asr_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "asr")
+        ).one()
+        asr_stage.status = "failed"
+        asr_stage.summary = "missing_model"
+        session.add(asr_stage)
+
+    download_response = client.post(
+        f"/api/tasks/{task_id}/asr/models/download",
+        json={"model_keys": ["whisperx"]},
+    )
+
+    assert download_response.status_code == 202
+    body = download_response.json()
+    assert body["stage"] == "asr"
+    assert body["kind"] == "missing_model"
+    assert [model["key"] for model in body["models"]] == ["whisperx"]
+
+
+def test_asr_model_download_rejects_invalid_model_keys(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1invalidmodelkey001"},
+    )
+    task_id = response.json()["task_id"]
+
+    download_response = client.post(
+        f"/api/tasks/{task_id}/asr/models/download",
+        json={"model_keys": ["not-a-real-model"]},
+    )
+
+    assert download_response.status_code == 422
+
+
+def test_asr_model_download_requires_missing_model_failure_state(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1downloadstate001"},
+    )
+    task_id = response.json()["task_id"]
+
+    download_response = client.post(
+        f"/api/tasks/{task_id}/asr/models/download",
+        json={"model_keys": ["whisperx"]},
+    )
+
+    assert download_response.status_code == 409
