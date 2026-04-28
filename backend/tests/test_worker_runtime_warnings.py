@@ -252,3 +252,104 @@ def test_worker_retry_preserves_runtime_warning_surfacing(backend_env, monkeypat
         ],
     }
     assert translation_attempts == 2
+
+
+def test_claim_next_job_recovers_stale_running_gpu_job(backend_env, monkeypatch) -> None:
+    stale_task_id = _create_task("https://www.bilibili.com/video/BV1stale001")
+    pending_task_id = _create_task("https://www.bilibili.com/video/BV1pending001")
+
+    from app.db import session_scope
+    from app.models import Task, TaskJob, TaskStage, utc_now
+    from app.worker import claim_next_job
+
+    stale_now = utc_now() - timedelta(minutes=10)
+    monkeypatch.setenv("APP_WORKER_RUNNING_JOB_STALE_SECONDS", "60")
+
+    with session_scope() as session:
+        stale_task = session.get(Task, stale_task_id)
+        assert stale_task is not None
+        stale_task.status = "running"
+        stale_task.updated_at = stale_now
+        session.add(stale_task)
+
+        stale_job = session.exec(select(TaskJob).where(TaskJob.task_id == stale_task_id)).one()
+        stale_job.status = "running"
+        stale_job.stage_name = "ingest"
+        stale_job.started_at = stale_now
+        stale_job.updated_at = stale_now
+        stale_job.finished_at = None
+        session.add(stale_job)
+
+        stale_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == stale_task_id).where(TaskStage.name == "ingest")
+        ).one()
+        stale_stage.status = "running"
+        stale_stage.started_at = stale_now
+        stale_stage.updated_at = stale_now
+        stale_stage.finished_at = None
+        session.add(stale_stage)
+
+    claimed = claim_next_job()
+
+    assert claimed is not None
+    assert claimed.task_id == pending_task_id
+    assert claimed.stage_name == "ingest"
+
+    with session_scope() as session:
+        stale_task = session.get(Task, stale_task_id)
+        stale_job = session.exec(select(TaskJob).where(TaskJob.task_id == stale_task_id)).one()
+        stale_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == stale_task_id).where(TaskStage.name == "ingest")
+        ).one()
+        stale_task_status = stale_task.status if stale_task is not None else None
+        stale_job_status = stale_job.status
+        stale_stage_status = stale_stage.status
+        stale_stage_summary = stale_stage.summary
+
+    assert stale_task is not None
+    assert stale_task_status == "failed"
+    assert stale_job_status == "failed"
+    assert stale_stage_status == "failed"
+    assert stale_stage_summary == "Recovered stale running job"
+
+    ingest_log = Path(backend_env["data_dir"]) / "tasks" / stale_task_id / "logs" / "ingest.log"
+    assert "worker:recovered stale running job" in ingest_log.read_text(encoding="utf-8")
+
+
+def test_claim_next_job_keeps_fresh_running_gpu_job_blocking_queue(backend_env, monkeypatch) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1fresh001")
+
+    from app.db import session_scope
+    from app.models import Task, TaskJob, TaskStage, utc_now
+    from app.worker import claim_next_job
+
+    fresh_now = utc_now()
+    monkeypatch.setenv("APP_WORKER_RUNNING_JOB_STALE_SECONDS", "3600")
+
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.status = "running"
+        task.updated_at = fresh_now
+        session.add(task)
+
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+        job.status = "running"
+        job.stage_name = "ingest"
+        job.started_at = fresh_now
+        job.updated_at = fresh_now
+        job.finished_at = None
+        session.add(job)
+
+        stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "ingest")
+        ).one()
+        stage.status = "running"
+        stage.started_at = fresh_now
+        stage.updated_at = fresh_now
+        stage.finished_at = None
+        session.add(stage)
+
+    claimed = claim_next_job()
+
+    assert claimed is None

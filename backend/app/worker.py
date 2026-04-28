@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Callable
 
 from sqlmodel import select
@@ -64,8 +66,65 @@ def _surface_preflight_runtime_summary(task_id: str, stage_name: str) -> str | N
     return summary
 
 
+def _get_running_job_stale_seconds() -> int:
+    raw_value = os.getenv("APP_WORKER_RUNNING_JOB_STALE_SECONDS", "300")
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return 300
+
+
+def _normalize_comparable_datetime(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.replace(tzinfo=None)
+
+
+def _mark_job_stale_failed(session, job: TaskJob) -> None:
+    now = utc_now()
+    task = session.get(Task, job.task_id)
+    stage = session.exec(
+        select(TaskStage)
+        .where(TaskStage.task_id == job.task_id)
+        .where(TaskStage.name == job.stage_name)
+    ).first()
+
+    job.status = "failed"
+    job.finished_at = now
+    job.updated_at = now
+    session.add(job)
+
+    if task is not None:
+        task.status = "failed"
+        task.updated_at = now
+        session.add(task)
+
+    if stage is not None:
+        stage.status = "failed"
+        stage.summary = "Recovered stale running job"
+        stage.finished_at = now
+        stage.updated_at = now
+        session.add(stage)
+        append_stage_log(log_file_for_stage(job.task_id, job.stage_name), "worker:recovered stale running job")
+
+
+def _recover_stale_running_jobs(session) -> None:
+    stale_before = _normalize_comparable_datetime(utc_now() - timedelta(seconds=_get_running_job_stale_seconds()))
+    running_jobs = session.exec(
+        select(TaskJob).where(TaskJob.gpu_bound.is_(True)).where(TaskJob.status == "running")
+    ).all()
+    for job in running_jobs:
+        job_updated_at = _normalize_comparable_datetime(job.updated_at)
+        if job_updated_at is None or job_updated_at > stale_before:
+            continue
+        _mark_job_stale_failed(session, job)
+
+
 def claim_next_job() -> ClaimedJob | None:
     with session_scope() as session:
+        _recover_stale_running_jobs(session)
         running_gpu_job = session.exec(
             select(TaskJob).where(TaskJob.gpu_bound.is_(True)).where(TaskJob.status == "running")
         ).first()
