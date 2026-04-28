@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 
 import {
+	downloadAsrModels,
 	getTaskArtifacts,
 	getTaskDetail,
 	getTaskLogs,
@@ -17,6 +18,7 @@ import {
 	formatTaskStatusLabel,
 	humanizeSummary,
 	isTerminalStatus,
+	type AsrMissingModelRecovery,
 	type StageLogSummary,
 	safeParseMetadata,
 	type TaskStageRecord,
@@ -125,6 +127,7 @@ function ArtifactCard({ artifact }: { artifact: ArtifactRecord }) {
 export function TaskDetailPage() {
 	const params = useParams();
 	const taskId = params.taskId ?? "";
+	const queryClient = useQueryClient();
 
 	const taskDetailQuery = useQuery({
 		queryKey: ["task", taskId, "detail"],
@@ -163,6 +166,35 @@ export function TaskDetailPage() {
 	const stageRows = useMemo(() => buildStageRows(stages, logs), [logs, stages]);
 	const failedStage =
 		stageRows.find((stage) => stage.status === "failed") ?? null;
+	const failureRecovery = taskDetailQuery.data?.failure_recovery;
+	const asrMissingModelRecovery: AsrMissingModelRecovery | null =
+		failureRecovery?.stage === "asr" &&
+		failureRecovery.kind === "missing_model"
+			? failureRecovery
+			: null;
+	const downloadableModelKeys =
+		asrMissingModelRecovery?.models
+			.filter(
+				(model) => model.download_supported && model.status === "missing",
+			)
+			.map((model) => model.key) ?? [];
+
+	const downloadAsrModelsMutation = useMutation({
+		mutationFn: () => downloadAsrModels(taskId, downloadableModelKeys),
+		onSuccess: async () => {
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: ["task", taskId, "detail"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["task", taskId, "stages"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["task", taskId, "logs"],
+				}),
+			]);
+		},
+	});
 
 	if (taskDetailQuery.isPending && !taskDetailQuery.data) {
 		return (
@@ -225,6 +257,48 @@ export function TaskDetailPage() {
 							formatStageLabel(failedStage.name),
 						)}
 					</p>
+					{asrMissingModelRecovery ? (
+						<>
+							<p className="eyebrow">
+								{TASK_DETAIL_COPY.failure.missingModel.eyebrow}
+							</p>
+							<h4>{TASK_DETAIL_COPY.failure.missingModel.title}</h4>
+							<p>{asrMissingModelRecovery.message}</p>
+							<p className="support-copy">
+								{TASK_DETAIL_COPY.failure.missingModel.manualHint}
+							</p>
+							<dl className="metadata-list">
+								{asrMissingModelRecovery.models.map((model) => (
+									<div className="metadata-list__row" key={model.key}>
+										<dt>{model.label}</dt>
+										<dd>{model.target_dir}</dd>
+									</div>
+								))}
+							</dl>
+							<button
+								className="primary-button"
+								disabled={
+									downloadableModelKeys.length === 0 ||
+									downloadAsrModelsMutation.isPending
+								}
+								onClick={() => {
+									void downloadAsrModelsMutation.mutateAsync();
+								}}
+								type="button"
+							>
+								{downloadAsrModelsMutation.isPending
+									? TASK_DETAIL_COPY.failure.missingModel.downloadPending
+									: TASK_DETAIL_COPY.failure.missingModel.downloadIdle}
+							</button>
+							{downloadAsrModelsMutation.isError ? (
+								<p className="form-error">
+									{downloadAsrModelsMutation.error instanceof Error
+										? downloadAsrModelsMutation.error.message
+										: asrMissingModelRecovery.message}
+								</p>
+							) : null}
+						</>
+					) : null}
 				</div>
 			) : null}
 
