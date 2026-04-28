@@ -70,9 +70,18 @@ class _FakeWhisperX:
         assert compute_type == "int8"
         return _FakeModel(self.transcription_result)
 
-    def load_align_model(self, *, language_code: str, device: str, model_name: str | None = None):
+    def load_align_model(
+        self,
+        *,
+        language_code: str,
+        device: str,
+        model_name: str | None = None,
+        model_dir: str | None = None,
+        model_cache_only: bool = False,
+    ):
         assert language_code == "zh"
         assert device == "cpu"
+        assert model_cache_only is False
         return object(), {"language_code": language_code, "align_model_name": model_name or "default-align"}
 
     def align(
@@ -260,3 +269,138 @@ def test_alignment_failure_is_classified(backend_env, monkeypatch) -> None:
 
     assert stage_status == "failed"
     assert stage_summary == "alignment_failed"
+
+
+def test_missing_model_recovery_payload_describes_main_and_alignment_targets(
+    backend_env,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("APP_WHISPERX_MODEL_NAME", "large-v3")
+    monkeypatch.setenv(
+        "APP_WHISPERX_ALIGNMENT_MODEL_NAME",
+        "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    )
+    monkeypatch.setenv("APP_WHISPERX_MODEL_CACHE_DIR", str(Path(backend_env["data_dir"]) / "models" / "whisperx"))
+
+    from app.services.asr_whisperx import build_asr_missing_model_recovery
+    from app.settings import get_settings
+
+    recovery = build_asr_missing_model_recovery(get_settings())
+
+    assert recovery["stage"] == "asr"
+    assert recovery["kind"] == "missing_model"
+    assert [model["key"] for model in recovery["models"]] == ["whisperx", "alignment"]
+    assert all(model["target_dir"] for model in recovery["models"])
+    assert all(model["download_supported"] is True for model in recovery["models"])
+
+
+def test_download_asr_missing_models_downloads_only_requested_missing_assets(
+    backend_env,
+    monkeypatch,
+) -> None:
+    model_root = Path(backend_env["data_dir"]) / "models"
+    monkeypatch.setenv("APP_WHISPERX_MODEL_CACHE_DIR", str(model_root / "whisperx"))
+
+    snapshot_calls: list[tuple[str, str]] = []
+    faster_whisper_calls: list[tuple[str, str]] = []
+
+    def fake_download_snapshot(*, repo_id: str, local_dir: str, **kwargs):
+        snapshot_calls.append((repo_id, local_dir))
+        Path(local_dir).mkdir(parents=True, exist_ok=True)
+        (Path(local_dir) / "config.json").write_text("{}", encoding="utf-8")
+        return local_dir
+
+    def fake_download_faster_whisper_model(model_ref: str, output_dir: str, **kwargs):
+        faster_whisper_calls.append((model_ref, output_dir))
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        (Path(output_dir) / "config.json").write_text("{}", encoding="utf-8")
+        (Path(output_dir) / "model.bin").write_bytes(b"fixture")
+        return output_dir
+
+    monkeypatch.setattr("app.services.asr_whisperx.snapshot_download", fake_download_snapshot)
+    monkeypatch.setattr(
+        "app.services.asr_whisperx.download_faster_whisper_model",
+        fake_download_faster_whisper_model,
+    )
+
+    from app.services.asr_whisperx import download_asr_missing_models
+    from app.settings import get_settings
+
+    result = download_asr_missing_models(
+        get_settings(),
+        requested_keys=["whisperx", "alignment"],
+    )
+
+    assert [item["key"] for item in result["models"]] == ["whisperx", "alignment"]
+    assert faster_whisper_calls == [
+        ("large-v3", str(model_root / "whisperx" / "whisperx")),
+    ]
+    assert snapshot_calls == [
+        (
+            "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+            str(model_root / "whisperx" / "alignment"),
+        ),
+    ]
+    assert all(item["status"] == "downloaded" for item in result["models"])
+
+
+def test_transcribe_uses_recovery_target_directories_when_models_are_present_locally(
+    backend_env,
+    monkeypatch,
+) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1localsnap001")
+    _prepare_audio_fixture(Path(backend_env["data_dir"]), task_id)
+    model_root = Path(backend_env["data_dir"]) / "models" / "whisperx"
+    main_target = model_root / "whisperx"
+    alignment_target = model_root / "alignment"
+    main_target.mkdir(parents=True, exist_ok=True)
+    alignment_target.mkdir(parents=True, exist_ok=True)
+    (main_target / "config.json").write_text("{}", encoding="utf-8")
+    (main_target / "model.bin").write_bytes(b"fixture")
+    (alignment_target / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("APP_WHISPERX_MODEL_CACHE_DIR", str(model_root))
+
+    observed: dict[str, str | None] = {}
+
+    class _LocalPathWhisperX(_FakeWhisperX):
+        def load_model(self, model_name: str, device: str, *, compute_type: str, download_root: str | None = None):
+            observed["main_model_name"] = model_name
+            observed["main_download_root"] = download_root
+            assert device == "cpu"
+            assert compute_type == "int8"
+            return _FakeModel(self.transcription_result)
+
+        def load_align_model(
+            self,
+            *,
+            language_code: str,
+            device: str,
+            model_name: str | None = None,
+            model_dir: str | None = None,
+            model_cache_only: bool = False,
+        ):
+            observed["align_model_name"] = model_name
+            observed["align_model_dir"] = model_dir
+            return super().load_align_model(
+                language_code=language_code,
+                device=device,
+                model_name=model_name,
+                model_dir=model_dir,
+                model_cache_only=model_cache_only,
+            )
+
+    fake_whisperx = _LocalPathWhisperX(
+        transcription_result={"segments": [{"start": 0.0, "end": 1.0, "text": "你好"}]},
+        aligned_result={"segments": [{"start": 0.0, "end": 1.0, "text": "你好", "words": []}]},
+    )
+    monkeypatch.setattr("app.services.asr_whisperx._load_whisperx_module", lambda: fake_whisperx)
+
+    from app.db import session_scope
+    from app.services.asr_whisperx import transcribe_task_audio
+
+    with session_scope() as session:
+        transcribe_task_audio(session, task_id)
+
+    assert observed["main_model_name"] == str(main_target)
+    assert observed["align_model_name"] == str(alignment_target)
+    assert observed["align_model_dir"] == str(alignment_target)
