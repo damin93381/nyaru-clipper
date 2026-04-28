@@ -1,14 +1,21 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
-import { getTaskArtifacts, getTaskDetail, getTaskLogs, getTaskStages } from "../lib/api";
+import {
+  downloadAsrModels,
+  getTaskArtifacts,
+  getTaskDetail,
+  getTaskLogs,
+  getTaskStages,
+} from "../lib/api";
 import {
   CANONICAL_STAGES,
   formatStageLabel,
   humanizeSummary,
   isTerminalStatus,
   safeParseMetadata,
+  type AsrMissingModelRecovery,
   type ArtifactRecord,
   type StageLogSummary,
   type TaskStageRecord,
@@ -105,6 +112,7 @@ function ArtifactCard({ artifact }: { artifact: ArtifactRecord }) {
 export function TaskDetailPage() {
   const params = useParams();
   const taskId = params.taskId ?? "";
+  const queryClient = useQueryClient();
 
   const taskDetailQuery = useQuery({
     queryKey: ["task", taskId, "detail"],
@@ -142,6 +150,26 @@ export function TaskDetailPage() {
 
   const stageRows = useMemo(() => buildStageRows(stages, logs), [logs, stages]);
   const failedStage = stageRows.find((stage) => stage.status === "failed") ?? null;
+  const failureRecovery = taskDetailQuery.data?.failure_recovery;
+  const asrMissingModelRecovery: AsrMissingModelRecovery | null =
+    failureRecovery?.stage === "asr" && failureRecovery.kind === "missing_model"
+      ? failureRecovery
+      : null;
+  const downloadableModelKeys =
+    asrMissingModelRecovery?.models
+      .filter((model) => model.download_supported && model.status === "missing")
+      .map((model) => model.key) ?? [];
+
+  const downloadAsrModelsMutation = useMutation({
+    mutationFn: () => downloadAsrModels(taskId, downloadableModelKeys),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["task", taskId, "detail"] }),
+        queryClient.invalidateQueries({ queryKey: ["task", taskId, "stages"] }),
+        queryClient.invalidateQueries({ queryKey: ["task", taskId, "logs"] }),
+      ]);
+    },
+  });
 
   if (taskDetailQuery.isPending && !taskDetailQuery.data) {
     return (
@@ -186,6 +214,43 @@ export function TaskDetailPage() {
           <h3>{`${formatStageLabel(failedStage.name)} stage failed`}</h3>
           <p>{failedStage.summary}</p>
           <p>{`Retry-ready from ${failedStage.name}. Upstream successes remain intact while downstream stages wait.`}</p>
+          {asrMissingModelRecovery ? (
+            <>
+              <p className="eyebrow">ASR model recovery</p>
+              <h4>Missing model handling</h4>
+              <p>{asrMissingModelRecovery.message}</p>
+              <p className="support-copy">
+                You can place the required model files in the directories below, then rerun the ASR stage.
+              </p>
+              <dl className="metadata-list">
+                {asrMissingModelRecovery.models.map((model) => (
+                  <div className="metadata-list__row" key={model.key}>
+                    <dt>{model.label}</dt>
+                    <dd>{model.target_dir}</dd>
+                  </div>
+                ))}
+              </dl>
+              <button
+                className="primary-button"
+                disabled={downloadableModelKeys.length === 0 || downloadAsrModelsMutation.isPending}
+                onClick={() => {
+                  void downloadAsrModelsMutation.mutateAsync();
+                }}
+                type="button"
+              >
+                {downloadAsrModelsMutation.isPending
+                  ? "Downloading missing ASR models..."
+                  : "Download missing ASR models"}
+              </button>
+              {downloadAsrModelsMutation.isError ? (
+                <p className="form-error">
+                  {downloadAsrModelsMutation.error instanceof Error
+                    ? downloadAsrModelsMutation.error.message
+                    : asrMissingModelRecovery.message}
+                </p>
+              ) : null}
+            </>
+          ) : null}
         </div>
       ) : null}
 

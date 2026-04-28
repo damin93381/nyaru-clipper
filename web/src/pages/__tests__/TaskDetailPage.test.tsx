@@ -1,15 +1,27 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { TaskDetailPage, getPollingInterval } from "../TaskDetailPage";
-import { getTaskArtifacts, getTaskDetail, getTaskLogs, getTaskStages } from "../../lib/api";
-import type { ArtifactRecord, StageLogSummary, TaskDetail, TaskStageRecord } from "../../lib/types";
+import {
+  downloadAsrModels,
+  getTaskArtifacts,
+  getTaskDetail,
+  getTaskLogs,
+  getTaskStages,
+} from "../../lib/api";
+import type {
+  ArtifactRecord,
+  StageLogSummary,
+  TaskDetail,
+  TaskStageRecord,
+} from "../../lib/types";
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
   return {
     ...actual,
+    downloadAsrModels: vi.fn(),
     getTaskDetail: vi.fn(),
     getTaskStages: vi.fn(),
     getTaskArtifacts: vi.fn(),
@@ -74,10 +86,44 @@ function mockTask(status: TaskDetail["status"]): TaskDetail {
   };
 }
 
+function mockTaskWithAsrMissingModelRecovery(): TaskDetail {
+  return {
+    ...mockTask("failed"),
+    failure_recovery: {
+      stage: "asr",
+      kind: "missing_model",
+      message: "ASR 缺少 WhisperX 模型文件。",
+      models: [
+        {
+          key: "whisperx",
+          label: "WhisperX 主模型",
+          status: "missing",
+          target_dir: "/models/whisperx/whisperx",
+          repo_id: "large-v3",
+          download_supported: true,
+        },
+        {
+          key: "alignment",
+          label: "Alignment 模型",
+          status: "missing",
+          target_dir: "/models/whisperx/alignment",
+          repo_id: "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+          download_supported: true,
+        },
+      ],
+    },
+  };
+}
+
 describe("TaskDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    vi.mocked(downloadAsrModels).mockResolvedValue({
+      stage: "asr",
+      kind: "missing_model",
+      models: [],
+    });
     vi.mocked(getTaskStages).mockResolvedValue(canonicalStages);
     vi.mocked(getTaskArtifacts).mockResolvedValue(artifacts);
     vi.mocked(getTaskLogs).mockResolvedValue(failureLogs);
@@ -104,6 +150,29 @@ describe("TaskDetailPage", () => {
     ]) {
       expect(screen.getByRole("heading", { level: 4, name: new RegExp(stageName, "i") })).toBeInTheDocument();
     }
+  });
+
+  it("renders inline ASR missing-model recovery guidance with download action and target directories", async () => {
+    vi.mocked(getTaskDetail).mockResolvedValue(mockTaskWithAsrMissingModelRecovery());
+
+    renderPage();
+
+    expect(await screen.findByText("ASR 缺少 WhisperX 模型文件。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download missing ASR models" })).toBeInTheDocument();
+    expect(screen.getByText("/models/whisperx/whisperx")).toBeInTheDocument();
+    expect(screen.getByText("/models/whisperx/alignment")).toBeInTheDocument();
+  });
+
+  it("requests automatic download for all missing ASR recovery models", async () => {
+    vi.mocked(getTaskDetail).mockResolvedValue(mockTaskWithAsrMissingModelRecovery());
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download missing ASR models" }));
+
+    await waitFor(() => {
+      expect(downloadAsrModels).toHaveBeenCalledWith("task-fixture123", ["whisperx", "alignment"]);
+    });
   });
 
   it("uses a 3-second polling cadence for non-terminal task states", () => {

@@ -1,8 +1,12 @@
 import type {
+  DownloadAsrModelsPayload,
+  DownloadAsrModelsResponse,
   ArtifactRecord,
+  AsrMissingModelKey,
   ClipExportPayload,
   ClipExportResponse,
   CreateTaskPayload,
+  RuntimeCapabilities,
   StageLogSummary,
   TaskDetail,
   TaskStageRecord,
@@ -90,6 +94,26 @@ export function exportTaskClip(taskId: string, payload: ClipExportPayload): Prom
   });
 }
 
+export function downloadAsrModels(
+  taskId: string,
+  modelKeys: AsrMissingModelKey[],
+): Promise<DownloadAsrModelsResponse> {
+  const payload: DownloadAsrModelsPayload = {
+    model_keys: modelKeys,
+  };
+
+  return request<DownloadAsrModelsResponse>(
+    `/tasks/${taskId}/asr/models/download`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function getRuntimeCapabilities(): Promise<RuntimeCapabilities> {
+  return request<RuntimeCapabilities>("/runtime/capabilities");
+}
 export async function fetchArtifactJson<T>(path: string): Promise<T> {
   const response = await fetch(resolveArtifactUrl(path), {
     headers: {
