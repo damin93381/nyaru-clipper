@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -9,7 +11,16 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
-from app.models import Artifact, CANONICAL_STAGES, Task, TaskJob, TaskStage, TERMINAL_STATUSES, utc_now
+from app.models import (
+    Artifact,
+    CANONICAL_STAGES,
+    Task,
+    TaskExecutionProgress,
+    TaskJob,
+    TaskStage,
+    TERMINAL_STATUSES,
+    utc_now,
+)
 from app.services.storage import build_artifact_content_path, ensure_task_dirs, summarize_stage_log
 
 BV_PATTERN = re.compile(r"(BV[0-9A-Za-z]+)", re.IGNORECASE)
@@ -20,6 +31,7 @@ class TaskRecord:
     task: Task
     stages: list[TaskStage]
     artifacts: list[Artifact]
+    execution_progress: TaskExecutionProgress | None = None
 
 
 def normalize_source_url(source_url: str) -> tuple[str, str | None]:
@@ -53,6 +65,41 @@ def _serialize_artifact(artifact: Artifact) -> dict[str, Any]:
             artifact_path=artifact.path,
         ),
         "metadata_json": artifact.metadata_json,
+    }
+
+
+def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _deserialize_progress_phases(phase_timings_json: str) -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(phase_timings_json)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def _serialize_execution_progress(progress: TaskExecutionProgress | None) -> dict[str, Any] | None:
+    if progress is None:
+        return None
+    phase_started_at = _normalize_utc_datetime(progress.phase_started_at)
+    heartbeat_at = _normalize_utc_datetime(progress.heartbeat_at)
+    return {
+        "stage_name": progress.stage_name,
+        "current_phase": progress.current_phase,
+        "phase_index": progress.phase_index,
+        "phase_count": progress.phase_count,
+        "phase_started_at": phase_started_at.isoformat() if phase_started_at else None,
+        "heartbeat_at": heartbeat_at.isoformat() if heartbeat_at else None,
+        "latest_message": progress.latest_message,
+        "phases": _deserialize_progress_phases(progress.phase_timings_json),
     }
 
 
@@ -97,7 +144,62 @@ def get_task_record(session: Session, task_id: str) -> TaskRecord | None:
     artifacts = session.exec(
         select(Artifact).where(Artifact.task_id == task_id).order_by(Artifact.id)
     ).all()
-    return TaskRecord(task=task, stages=stages, artifacts=artifacts)
+    execution_progress = session.get(TaskExecutionProgress, task_id)
+    return TaskRecord(
+        task=task,
+        stages=stages,
+        artifacts=artifacts,
+        execution_progress=execution_progress,
+    )
+
+
+def upsert_task_execution_progress(
+    session: Session,
+    *,
+    task_id: str,
+    stage_name: str,
+    current_phase: str,
+    phase_index: int,
+    phase_count: int,
+    latest_message: str | None,
+    phase_started_at: datetime | None,
+    heartbeat_at: datetime | None,
+    phase_timings: list[dict[str, Any]],
+) -> TaskExecutionProgress:
+    progress = session.get(TaskExecutionProgress, task_id)
+    if progress is None:
+        progress = TaskExecutionProgress(
+            task_id=task_id,
+            stage_name=stage_name,
+            current_phase=current_phase,
+            phase_index=phase_index,
+            phase_count=phase_count,
+            latest_message=latest_message,
+            phase_started_at=phase_started_at,
+            heartbeat_at=heartbeat_at,
+            phase_timings_json=json.dumps(phase_timings, sort_keys=True),
+        )
+    else:
+        progress.stage_name = stage_name
+        progress.current_phase = current_phase
+        progress.phase_index = phase_index
+        progress.phase_count = phase_count
+        progress.latest_message = latest_message
+        progress.phase_started_at = phase_started_at
+        progress.heartbeat_at = heartbeat_at
+        progress.phase_timings_json = json.dumps(phase_timings, sort_keys=True)
+    progress.updated_at = utc_now()
+    session.add(progress)
+    session.flush()
+    return progress
+
+
+def clear_task_execution_progress(session: Session, *, task_id: str) -> None:
+    progress = session.get(TaskExecutionProgress, task_id)
+    if progress is None:
+        return
+    session.delete(progress)
+    session.flush()
 
 
 def create_task(session: Session, source_url: str) -> tuple[dict[str, Any], bool]:
@@ -146,7 +248,11 @@ def get_task_detail(session: Session, task_id: str) -> dict[str, Any] | None:
     record = get_task_record(session, task_id)
     if record is None:
         return None
-    return _task_to_response(record.task, record.stages)
+    payload = _task_to_response(record.task, record.stages)
+    execution_progress = _serialize_execution_progress(record.execution_progress)
+    if execution_progress is not None:
+        payload["execution_progress"] = execution_progress
+    return payload
 
 
 def list_task_stages(session: Session, task_id: str) -> list[dict[str, Any]] | None:
@@ -206,6 +312,9 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
     record.task.status = "pending"
     record.task.updated_at = utc_now()
     session.add(record.task)
+
+    if reset_index <= CANONICAL_STAGES.index("asr"):
+        clear_task_execution_progress(session, task_id=task_id)
 
     job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).first()
     if job is None:

@@ -19,12 +19,14 @@ CANONICAL_STAGES = [
     "report",
 ]
 
-TERMINAL_STATUSES = ["success", "failed"]
+TERMINAL_STATUSES = ["success", "failed", "cancelled"]
 
 __all__ = [
     "Artifact",
     "CANONICAL_STAGES",
     "ClipCandidate",
+    "TaskExecutionControl",
+    "TaskExecutionProgress",
     "TERMINAL_STATUSES",
     "Task",
     "TaskJob",
@@ -66,6 +68,30 @@ class TaskStage(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)
     started_at: datetime | None = Field(default=None)
     finished_at: datetime | None = Field(default=None)
+
+
+class TaskExecutionProgress(SQLModel, table=True):
+    task_id: str = Field(primary_key=True, foreign_key="task.id")
+    stage_name: str = Field(index=True)
+    current_phase: str
+    phase_index: int
+    phase_count: int
+    latest_message: str | None = Field(default=None)
+    phase_started_at: datetime | None = Field(default=None)
+    heartbeat_at: datetime | None = Field(default=None)
+    phase_timings_json: str = Field(default="[]")
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class TaskExecutionControl(SQLModel, table=True):
+    task_id: str = Field(primary_key=True, foreign_key="task.id")
+    execution_token: str | None = Field(default=None, index=True)
+    active_process_group_id: int | None = Field(default=None)
+    cancel_requested: bool = Field(default=False, index=True)
+    force_kill_requested: bool = Field(default=False)
+    heartbeat_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class Artifact(SQLModel, table=True):
