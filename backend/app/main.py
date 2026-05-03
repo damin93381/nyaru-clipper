@@ -9,10 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import api_router
 from app.db import init_db
+from app.settings import get_settings
 from app.services.runtime_capabilities import get_runtime_capability_summary
 from app.services.storage import get_tasks_root
 
 runtime_logger = logging.getLogger("app.runtime")
+settings = get_settings()
 
 
 @asynccontextmanager
@@ -39,6 +41,7 @@ app = FastAPI(title="Bilibili VTuber Suite API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_origin_regex=settings.cors_allowed_origin_regex,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

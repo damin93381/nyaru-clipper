@@ -245,3 +245,21 @@ def test_runtime_capabilities_endpoint_allows_uv_first_browser_origin(tmp_path, 
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+
+def test_runtime_capabilities_endpoint_allows_lan_browser_origin(tmp_path, monkeypatch) -> None:
+    _configure_backend_env(tmp_path, monkeypatch)
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/runtime/capabilities",
+            headers={
+                "Origin": "http://172.29.186.118:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://172.29.186.118:5173"

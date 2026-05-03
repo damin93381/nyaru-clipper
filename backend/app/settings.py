@@ -8,6 +8,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="APP_", extra="ignore")
 
+    cors_allowed_origin_regex: str = (
+        r"^https?://(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|"
+        r"172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?::\d+)?$"
+    )
+
     bilibili_cookie_path: Path | None = None
     bbdown_binary: str = "BBDown"
     ytdlp_binary: str = "yt-dlp"
