@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import sys
+import time
+import types
 from pathlib import Path
 
 import pytest
@@ -27,6 +30,14 @@ def backend_env(tmp_path, monkeypatch) -> dict[str, Path | str]:
     monkeypatch.setenv("APP_WHISPERX_COMPUTE_TYPE", "int8")
     _reset_runtime_state()
     return {"data_dir": data_dir, "db_path": db_path}
+
+
+@pytest.fixture(autouse=True)
+def task_control_shim(monkeypatch):
+    shim = types.ModuleType("app.services.task_control")
+    shim.ensure_current_execution_context = lambda session, *, task_id: None
+    monkeypatch.setitem(sys.modules, "app.services.task_control", shim)
+    yield
 
 
 def _create_task(source_url: str) -> str:
@@ -122,8 +133,13 @@ def test_transcribe_fixture_audio_persists_alignment_json_and_srt(backend_env, m
     )
 
     monkeypatch.setattr("app.services.asr_whisperx._load_whisperx_module", lambda: fake_whisperx)
-    perf_values = iter([100.0, 101.5])
-    monkeypatch.setattr("app.services.asr_whisperx.time.perf_counter", lambda: next(perf_values))
+    clock = {"value": 100.0}
+
+    def _fake_perf_counter() -> float:
+        clock["value"] += 0.25
+        return clock["value"]
+
+    monkeypatch.setattr("app.services.asr_whisperx.time.perf_counter", _fake_perf_counter)
 
     from app.db import session_scope
     from app.models import Artifact, TaskStage
@@ -136,14 +152,14 @@ def test_transcribe_fixture_audio_persists_alignment_json_and_srt(backend_env, m
     assert result.transcript_path.exists()
     assert result.subtitle_path.exists()
     assert result.raw_alignment_path.exists()
-    assert result.elapsed_seconds == 1.5
+    assert result.elapsed_seconds > 0
     assert result.model_metadata["provider"] == "whisperx"
     assert result.model_metadata["model_name"] == "large-v3"
 
     transcript_payload = json.loads(result.transcript_path.read_text(encoding="utf-8"))
     assert [segment["id"] for segment in transcript_payload["segments"]] == ["seg-0001", "seg-0002"]
     assert transcript_payload["segments"][0]["words"][0]["text"] == "你好"
-    assert transcript_payload["elapsed_seconds"] == 1.5
+    assert transcript_payload["elapsed_seconds"] == result.elapsed_seconds
 
     assert result.subtitle_path.read_text(encoding="utf-8") == (
         "1\n"
@@ -171,7 +187,7 @@ def test_transcribe_fixture_audio_persists_alignment_json_and_srt(backend_env, m
     assert stage_status == "success"
     assert stage_summary == "Generated aligned transcript and Chinese subtitles"
     assert artifact_kinds == {"alignment_raw", "subtitle_srt", "transcript_json"}
-    assert transcript_metadata["elapsed_seconds"] == 1.5
+    assert transcript_metadata["elapsed_seconds"] == result.elapsed_seconds
 
 
 def test_missing_model_is_terminal(backend_env, monkeypatch) -> None:
@@ -404,3 +420,188 @@ def test_transcribe_uses_recovery_target_directories_when_models_are_present_loc
     assert observed["main_model_name"] == str(main_target)
     assert observed["align_model_name"] == str(alignment_target)
     assert observed["align_model_dir"] == str(alignment_target)
+
+
+def test_child_runner_emits_success_protocol_and_manifest(backend_env, monkeypatch, capsys) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1childsuccess001")
+    _prepare_audio_fixture(Path(backend_env["data_dir"]), task_id)
+    fake_whisperx = _FakeWhisperX(
+        transcription_result={
+            "segments": [
+                {"start": 0.0, "end": 1.2, "text": "你好", "words": [{"word": "你好", "start": 0.0, "end": 1.2}]},
+                {"start": 1.2, "end": 2.8, "text": "世界", "words": []},
+            ]
+        },
+        aligned_result={
+            "segments": [
+                {"start": 0.0, "end": 1.2, "text": "你好", "words": [{"word": "你好", "start": 0.0, "end": 1.2, "score": 0.95}]},
+                {"start": 1.2, "end": 2.8, "text": "世界", "words": []},
+            ],
+            "language": "zh",
+        },
+    )
+
+    clock = {"value": 100.0}
+
+    def _fake_perf_counter() -> float:
+        clock["value"] += 0.25
+        return clock["value"]
+
+    monkeypatch.setattr("app.services.asr_whisperx._load_whisperx_module", lambda: fake_whisperx)
+    monkeypatch.setattr("app.services.asr_whisperx.time.perf_counter", _fake_perf_counter)
+
+    from app.services.asr_child_runner import run_asr_child
+
+    result = run_asr_child(task_id)
+
+    captured = capsys.readouterr()
+    events = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+
+    assert result.status == "success"
+    assert [event["event"] for event in events] == [
+        "phase_start",
+        "heartbeat",
+        "phase_complete",
+        "phase_start",
+        "heartbeat",
+        "phase_complete",
+        "phase_start",
+        "heartbeat",
+        "phase_complete",
+        "phase_start",
+        "heartbeat",
+        "phase_complete",
+        "phase_start",
+        "heartbeat",
+        "phase_complete",
+        "success",
+    ]
+    assert [event["phase"] for event in events] == [
+        "model_load",
+        "model_load",
+        "model_load",
+        "vad",
+        "vad",
+        "vad",
+        "transcribe",
+        "transcribe",
+        "transcribe",
+        "align",
+        "align",
+        "align",
+        "persist",
+        "persist",
+        "persist",
+        "persist",
+    ]
+    assert Path(events[-1]["manifest_path"]) == result.manifest_path
+
+    assert list(manifest.keys()) == [
+        "status",
+        "elapsed_ms_total",
+        "phases",
+        "artifacts",
+        "model_metadata",
+        "error",
+    ]
+    assert manifest["status"] == "success"
+    assert manifest["elapsed_ms_total"] > 0
+    assert [phase["name"] for phase in manifest["phases"]] == ["model_load", "vad", "transcribe", "align", "persist"]
+    assert all(phase["status"] == "success" for phase in manifest["phases"])
+    assert manifest["artifacts"]["transcript_path"].endswith("asr-segments.json")
+    assert manifest["artifacts"]["subtitle_path"].endswith("subtitles.zh.srt")
+    assert manifest["artifacts"]["raw_alignment_path"].endswith("asr-alignment-raw.json")
+    assert manifest["model_metadata"]["model_name"] == "large-v3"
+    assert manifest["error"] is None
+
+
+def test_child_runner_emits_classified_failure_protocol(backend_env, monkeypatch, capsys) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1childfailure001")
+    clock = {"value": 200.0}
+
+    def _fake_perf_counter() -> float:
+        clock["value"] += 0.25
+        return clock["value"]
+
+    monkeypatch.setattr("app.services.asr_whisperx.time.perf_counter", _fake_perf_counter)
+
+    from app.services.asr_child_runner import run_asr_child
+
+    result = run_asr_child(task_id)
+
+    captured = capsys.readouterr()
+    events = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+
+    assert result.status == "failed"
+    assert [event["event"] for event in events] == ["failure"]
+    assert events[0]["phase"] == "model_load"
+    assert events[0]["code"] == "missing_input"
+
+    assert list(manifest.keys()) == [
+        "status",
+        "elapsed_ms_total",
+        "phases",
+        "artifacts",
+        "model_metadata",
+        "error",
+    ]
+    assert manifest["status"] == "failed"
+    assert manifest["error"]["code"] == "missing_input"
+    assert manifest["error"]["phase"] == "model_load"
+    assert [phase["status"] for phase in manifest["phases"]] == ["failed", "pending", "pending", "pending", "pending"]
+    assert manifest["artifacts"]["transcript_path"] is None
+    assert manifest["artifacts"]["subtitle_path"] is None
+    assert manifest["artifacts"]["raw_alignment_path"] is None
+
+
+def test_child_runner_rejects_noncanonical_task_id(backend_env) -> None:
+    from app.services.asr_child_runner import run_asr_child
+
+    with pytest.raises(ValueError, match="Invalid task_id"):
+        run_asr_child("../escape")
+
+
+def test_run_pipeline_phase_emits_ongoing_heartbeats_during_long_running_work(monkeypatch) -> None:
+    observed_events: list[tuple[str, int]] = []
+
+    class _Observer:
+        def phase_start(self, phase: str, *, phase_index: int, phase_count: int, message: str) -> None:
+            observed_events.append(("phase_start", 0))
+
+        def heartbeat(
+            self,
+            phase: str,
+            *,
+            phase_index: int,
+            phase_count: int,
+            elapsed_ms: int,
+            message: str,
+        ) -> None:
+            observed_events.append(("heartbeat", elapsed_ms))
+
+        def phase_complete(self, phase: str, *, phase_index: int, phase_count: int, elapsed_ms: int) -> None:
+            observed_events.append(("phase_complete", elapsed_ms))
+
+    from app.services.asr_whisperx import AsrPhaseResult, _run_pipeline_phase
+
+    phase_results = {"transcribe": AsrPhaseResult(name="transcribe", status="pending")}
+
+    def _slow_action() -> str:
+        time.sleep(0.35)
+        return "done"
+
+    result = _run_pipeline_phase(
+        phase="transcribe",
+        phase_results=phase_results,
+        observer=_Observer(),
+        action=_slow_action,
+    )
+
+    heartbeat_events = [event for event in observed_events if event[0] == "heartbeat"]
+
+    assert result == "done"
+    assert len(heartbeat_events) >= 2
+    assert heartbeat_events[0][1] == 0
+    assert any(elapsed_ms > 0 for _, elapsed_ms in heartbeat_events[1:])

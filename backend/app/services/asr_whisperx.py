@@ -2,22 +2,29 @@ from __future__ import annotations
 
 import importlib
 import json
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Protocol, TypeVar
 
 from sqlmodel import Session
 
 from app.paths import get_data_dir
 from app.repositories.tasks import get_task_record
 from app.services.pipeline_support import append_stage_log, set_stage_status
-from app.services.storage import ensure_task_dirs, log_file_for_stage, persist_artifact_metadata
+from app.services.storage import (
+    ensure_task_dirs,
+    log_file_for_stage,
+    persist_artifact_metadata,
+    resolve_task_artifact_path,
+)
 from app.services.subtitles import SubtitleSegment, SubtitleWord, write_subtitle_outputs
 from app.settings import Settings, get_settings
 
 snapshot_download: Any | None = None
 download_faster_whisper_model: Any | None = None
+ASR_STAGE_SUCCESS_SUMMARY = "Generated aligned transcript and Chinese subtitles"
 
 
 @dataclass(slots=True)
@@ -31,10 +38,90 @@ class AsrStageResult:
     segments: list[SubtitleSegment]
 
 
+@dataclass(slots=True)
+class AsrPhaseResult:
+    name: str
+    status: str
+    elapsed_ms: int | None = None
+
+
+@dataclass(slots=True)
+class AsrPipelineResult:
+    audio_path: Path
+    transcript_path: Path
+    subtitle_path: Path
+    raw_alignment_path: Path
+    model_metadata: dict[str, Any]
+    elapsed_seconds: float
+    elapsed_ms_total: int
+    segments: list[SubtitleSegment]
+    phases: list[AsrPhaseResult]
+
+
+@dataclass(slots=True)
+class AsrResultManifest:
+    status: str
+    elapsed_ms_total: int
+    phases: list[AsrPhaseResult]
+    artifacts: AsrArtifactPaths
+    model_metadata: dict[str, Any]
+    error: dict[str, Any] | None
+
+
 class AsrFailure(RuntimeError):
     def __init__(self, *, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+@dataclass(slots=True)
+class AsrArtifactPaths:
+    audio_path: Path
+    transcript_path: Path | None
+    subtitle_path: Path | None
+    raw_alignment_path: Path | None
+
+
+class AsrPipelineError(AsrFailure):
+    def __init__(
+        self,
+        *,
+        failure: AsrFailure,
+        phase: str,
+        phases: list[AsrPhaseResult],
+        elapsed_ms_total: int,
+        model_metadata: dict[str, Any],
+        artifacts: AsrArtifactPaths,
+    ):
+        super().__init__(code=failure.code, message=str(failure))
+        self.phase = phase
+        self.phases = phases
+        self.elapsed_ms_total = elapsed_ms_total
+        self.model_metadata = model_metadata
+        self.artifacts = artifacts
+
+
+class AsrPipelineObserver(Protocol):
+    def phase_start(self, phase: str, *, phase_index: int, phase_count: int, message: str) -> None: ...
+
+    def heartbeat(
+        self,
+        phase: str,
+        *,
+        phase_index: int,
+        phase_count: int,
+        elapsed_ms: int,
+        message: str,
+    ) -> None: ...
+
+    def phase_complete(self, phase: str, *, phase_index: int, phase_count: int, elapsed_ms: int) -> None: ...
+
+
+ASR_PIPELINE_PHASES = ("model_load", "vad", "transcribe", "align", "persist")
+ASR_PIPELINE_PHASE_INDEX = {phase: index for index, phase in enumerate(ASR_PIPELINE_PHASES, start=1)}
+ASR_PHASE_HEARTBEAT_INTERVAL_SECONDS = 0.1
+
+_PhaseValue = TypeVar("_PhaseValue")
 
 
 def _load_whisperx_module():
@@ -204,70 +291,318 @@ def transcribe_task_audio(session: Session, task_id: str) -> AsrStageResult:
     log_path = log_file_for_stage(task_id, "asr")
 
     append_stage_log(log_path, f"asr_input={audio_path}")
-    model_metadata = _build_model_metadata(settings)
-    raw_alignment_path = work_dir / "asr-alignment-raw.json"
-
-    started_at = time.perf_counter()
     try:
-        whisperx = _load_whisperx_module()
-        model = whisperx.load_model(
-            _resolve_main_model_ref(settings),
-            settings.whisperx_device,
-            compute_type=settings.whisperx_compute_type,
-            download_root=str(settings.whisperx_model_cache_dir) if settings.whisperx_model_cache_dir else None,
+        pipeline_result = execute_asr_pipeline(
+            audio_path=audio_path,
+            work_dir=work_dir,
+            settings=settings,
         )
-        transcription_result = model.transcribe(
-            str(audio_path),
-            batch_size=settings.whisperx_batch_size,
-            language=settings.whisperx_language,
-        )
-        language_code = transcription_result.get("language") or settings.whisperx_language
-        align_model, align_metadata = whisperx.load_align_model(
-            language_code=language_code,
-            device=settings.whisperx_device,
-            model_name=_resolve_alignment_model_ref(settings),
-            model_dir=str(_alignment_model_target_dir(settings)),
-        )
-        aligned_result = whisperx.align(
-            transcription_result.get("segments") or [],
-            align_model,
-            align_metadata,
-            str(audio_path),
-            settings.whisperx_device,
-            return_char_alignments=False,
-        )
-        raw_alignment_path.write_text(
-            json.dumps(aligned_result, ensure_ascii=False, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-        elapsed_seconds = round(time.perf_counter() - started_at, 3)
-        persist_artifact_metadata(
-            session,
-            task_id=task_id,
-            stage_name="asr",
-            kind="alignment_raw",
-            path=raw_alignment_path,
-            metadata={
-                "elapsed_seconds": elapsed_seconds,
-                "model_metadata": model_metadata,
-                "source_audio_path": str(audio_path),
-            },
-        )
-        segments = _normalize_aligned_segments(aligned_result.get("segments"))
-        transcript_path, subtitle_path = write_subtitle_outputs(
-            work_dir,
-            segments,
-            model_metadata=model_metadata,
-            elapsed_seconds=elapsed_seconds,
-        )
-    except Exception as exc:
-        failure = _classify_asr_exception(exc, settings=settings)
+    except AsrFailure as failure:
         append_stage_log(log_path, f"classified_failure={failure.code}")
         append_stage_log(log_path, str(failure))
         set_stage_status(session, task_id=task_id, stage_name="asr", status="failed", summary=failure.code)
         session.commit()
-        raise failure from exc
+        raise
 
+    _persist_asr_artifacts(
+        session,
+        task_id=task_id,
+        audio_path=pipeline_result.audio_path,
+        transcript_path=pipeline_result.transcript_path,
+        subtitle_path=pipeline_result.subtitle_path,
+        raw_alignment_path=pipeline_result.raw_alignment_path,
+        model_metadata=pipeline_result.model_metadata,
+        elapsed_seconds=pipeline_result.elapsed_seconds,
+        segment_count=len(pipeline_result.segments),
+        language=settings.whisperx_language,
+    )
+    set_stage_status(
+        session,
+        task_id=task_id,
+        stage_name="asr",
+        status="success",
+        summary=ASR_STAGE_SUCCESS_SUMMARY,
+    )
+    return AsrStageResult(
+        audio_path=pipeline_result.audio_path,
+        transcript_path=pipeline_result.transcript_path,
+        subtitle_path=pipeline_result.subtitle_path,
+        raw_alignment_path=pipeline_result.raw_alignment_path,
+        model_metadata=pipeline_result.model_metadata,
+        elapsed_seconds=pipeline_result.elapsed_seconds,
+        segments=pipeline_result.segments,
+    )
+
+
+def load_asr_result_manifest(manifest_path: Path) -> AsrResultManifest:
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        raise AsrFailure(
+            code="invalid_result_manifest",
+            message=f"ASR child result manifest is unavailable or invalid: {manifest_path}",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise AsrFailure(
+            code="invalid_result_manifest",
+            message=f"ASR child result manifest must be an object: {manifest_path}",
+        )
+
+    status = str(payload.get("status") or "").strip() or "failed"
+    try:
+        elapsed_ms_total = max(0, int(payload.get("elapsed_ms_total") or 0))
+    except (TypeError, ValueError):
+        elapsed_ms_total = 0
+    artifacts_payload = payload.get("artifacts")
+    if not isinstance(artifacts_payload, dict):
+        raise AsrFailure(
+            code="invalid_result_manifest",
+            message=f"ASR child result manifest is missing artifact paths: {manifest_path}",
+        )
+    model_metadata = payload.get("model_metadata")
+    error = payload.get("error")
+    return AsrResultManifest(
+        status=status,
+        elapsed_ms_total=elapsed_ms_total,
+        phases=_deserialize_manifest_phases(payload.get("phases")),
+        artifacts=AsrArtifactPaths(
+            audio_path=Path(str(artifacts_payload.get("audio_path") or "")),
+            transcript_path=_optional_manifest_path(artifacts_payload.get("transcript_path")),
+            subtitle_path=_optional_manifest_path(artifacts_payload.get("subtitle_path")),
+            raw_alignment_path=_optional_manifest_path(artifacts_payload.get("raw_alignment_path")),
+        ),
+        model_metadata=dict(model_metadata) if isinstance(model_metadata, dict) else {},
+        error=dict(error) if isinstance(error, dict) else None,
+    )
+
+
+def publish_asr_artifacts_from_manifest(
+    session: Session,
+    *,
+    task_id: str,
+    manifest: AsrResultManifest,
+) -> None:
+    if manifest.status != "success":
+        raise _manifest_error_to_failure(manifest)
+
+    audio_path = _require_manifest_path(task_id, manifest.artifacts.audio_path, kind="audio_path")
+    transcript_path = _require_manifest_path(task_id, manifest.artifacts.transcript_path, kind="transcript_path")
+    subtitle_path = _require_manifest_path(task_id, manifest.artifacts.subtitle_path, kind="subtitle_path")
+    raw_alignment_path = _require_manifest_path(
+        task_id,
+        manifest.artifacts.raw_alignment_path,
+        kind="raw_alignment_path",
+    )
+    elapsed_seconds = round(manifest.elapsed_ms_total / 1000, 3)
+    segment_count = _count_transcript_segments(transcript_path)
+    _persist_asr_artifacts(
+        session,
+        task_id=task_id,
+        audio_path=audio_path,
+        transcript_path=transcript_path,
+        subtitle_path=subtitle_path,
+        raw_alignment_path=raw_alignment_path,
+        model_metadata=manifest.model_metadata,
+        elapsed_seconds=elapsed_seconds,
+        segment_count=segment_count,
+        language=str(manifest.model_metadata.get("language") or ""),
+    )
+
+
+def execute_asr_pipeline(
+    *,
+    audio_path: Path,
+    work_dir: Path,
+    settings: Settings,
+    observer: AsrPipelineObserver | None = None,
+) -> AsrPipelineResult:
+    phase_results = {phase: AsrPhaseResult(name=phase, status="pending") for phase in ASR_PIPELINE_PHASES}
+    raw_alignment_path = work_dir / "asr-alignment-raw.json"
+    artifacts = AsrArtifactPaths(
+        audio_path=audio_path,
+        transcript_path=None,
+        subtitle_path=None,
+        raw_alignment_path=None,
+    )
+    model_metadata: dict[str, Any] = {}
+    started_at = time.perf_counter()
+    current_phase = ASR_PIPELINE_PHASES[0]
+
+    try:
+        _ensure_input_audio_path(audio_path)
+        model_metadata = _build_model_metadata(settings)
+        whisperx = _load_whisperx_module()
+        model = _run_pipeline_phase(
+            phase="model_load",
+            phase_results=phase_results,
+            observer=observer,
+            action=lambda: whisperx.load_model(
+                _resolve_main_model_ref(settings),
+                settings.whisperx_device,
+                compute_type=settings.whisperx_compute_type,
+                download_root=str(settings.whisperx_model_cache_dir) if settings.whisperx_model_cache_dir else None,
+            ),
+        )
+
+        current_phase = "vad"
+        _run_pipeline_phase(
+            phase="vad",
+            phase_results=phase_results,
+            observer=observer,
+            action=lambda: None,
+        )
+
+        current_phase = "transcribe"
+        transcription_result = _run_pipeline_phase(
+            phase="transcribe",
+            phase_results=phase_results,
+            observer=observer,
+            action=lambda: model.transcribe(
+                str(audio_path),
+                batch_size=settings.whisperx_batch_size,
+                language=settings.whisperx_language,
+            ),
+        )
+        language_code = transcription_result.get("language") or settings.whisperx_language
+
+        current_phase = "align"
+        aligned_result = _run_pipeline_phase(
+            phase="align",
+            phase_results=phase_results,
+            observer=observer,
+            action=lambda: _align_transcription_result(
+                whisperx=whisperx,
+                transcription_result=transcription_result,
+                audio_path=audio_path,
+                settings=settings,
+                language_code=language_code,
+            ),
+        )
+        segments = _normalize_aligned_segments(aligned_result.get("segments"))
+
+        current_phase = "persist"
+        output_elapsed_seconds = round(_elapsed_ms(started_at) / 1000, 3)
+        transcript_path, subtitle_path = _run_pipeline_phase(
+            phase="persist",
+            phase_results=phase_results,
+            observer=observer,
+            action=lambda: _persist_asr_outputs(
+                work_dir=work_dir,
+                raw_alignment_path=raw_alignment_path,
+                aligned_result=aligned_result,
+                segments=segments,
+                model_metadata=model_metadata,
+                elapsed_seconds=output_elapsed_seconds,
+            ),
+        )
+        artifacts.raw_alignment_path = raw_alignment_path
+        artifacts.transcript_path = transcript_path
+        artifacts.subtitle_path = subtitle_path
+        elapsed_ms_total = _elapsed_ms(started_at)
+        return AsrPipelineResult(
+            audio_path=audio_path,
+            transcript_path=transcript_path,
+            subtitle_path=subtitle_path,
+            raw_alignment_path=raw_alignment_path,
+            model_metadata=model_metadata,
+            elapsed_seconds=output_elapsed_seconds,
+            elapsed_ms_total=elapsed_ms_total,
+            segments=segments,
+            phases=list(phase_results.values()),
+        )
+    except Exception as exc:
+        failure = _classify_asr_exception(exc, settings=settings)
+        failed_phase = _resolve_failed_phase(phase_results, fallback=current_phase)
+        _mark_failed_phase(phase_results, failed_phase)
+        raise AsrPipelineError(
+            failure=failure,
+            phase=failed_phase,
+            phases=list(phase_results.values()),
+            elapsed_ms_total=_elapsed_ms(started_at),
+            model_metadata=model_metadata,
+            artifacts=artifacts,
+        ) from exc
+
+
+def _ensure_input_audio_path(audio_path: Path) -> None:
+    if audio_path.exists():
+        return
+    raise AsrFailure(
+        code="missing_input",
+        message="ASR input WAV is missing. Re-run media preparation or restore the normalized audio artifact before retrying.",
+    )
+
+
+def _align_transcription_result(
+    *,
+    whisperx,
+    transcription_result: dict[str, Any],
+    audio_path: Path,
+    settings: Settings,
+    language_code: str,
+) -> dict[str, Any]:
+    align_model, align_metadata = whisperx.load_align_model(
+        language_code=language_code,
+        device=settings.whisperx_device,
+        model_name=_resolve_alignment_model_ref(settings),
+        model_dir=str(_alignment_model_target_dir(settings)),
+    )
+    return whisperx.align(
+        transcription_result.get("segments") or [],
+        align_model,
+        align_metadata,
+        str(audio_path),
+        settings.whisperx_device,
+        return_char_alignments=False,
+    )
+
+
+def _persist_asr_outputs(
+    *,
+    work_dir: Path,
+    raw_alignment_path: Path,
+    aligned_result: dict[str, Any],
+    segments: list[SubtitleSegment],
+    model_metadata: dict[str, Any],
+    elapsed_seconds: float,
+) -> tuple[Path, Path]:
+    raw_alignment_path.write_text(
+        json.dumps(aligned_result, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return write_subtitle_outputs(
+        work_dir,
+        segments,
+        model_metadata=model_metadata,
+        elapsed_seconds=elapsed_seconds,
+    )
+
+
+def _persist_asr_artifacts(
+    session: Session,
+    *,
+    task_id: str,
+    audio_path: Path,
+    transcript_path: Path,
+    subtitle_path: Path,
+    raw_alignment_path: Path,
+    model_metadata: dict[str, Any],
+    elapsed_seconds: float,
+    segment_count: int,
+    language: str,
+) -> None:
+    persist_artifact_metadata(
+        session,
+        task_id=task_id,
+        stage_name="asr",
+        kind="alignment_raw",
+        path=raw_alignment_path,
+        metadata={
+            "elapsed_seconds": elapsed_seconds,
+            "model_metadata": model_metadata,
+            "source_audio_path": str(audio_path),
+        },
+    )
     persist_artifact_metadata(
         session,
         task_id=task_id,
@@ -277,7 +612,7 @@ def transcribe_task_audio(session: Session, task_id: str) -> AsrStageResult:
         metadata={
             "elapsed_seconds": elapsed_seconds,
             "model_metadata": model_metadata,
-            "segment_count": len(segments),
+            "segment_count": segment_count,
             "source_audio_path": str(audio_path),
         },
     )
@@ -290,26 +625,166 @@ def transcribe_task_audio(session: Session, task_id: str) -> AsrStageResult:
         metadata={
             "elapsed_seconds": elapsed_seconds,
             "model_metadata": model_metadata,
-            "segment_count": len(segments),
-            "language": settings.whisperx_language,
+            "segment_count": segment_count,
+            "language": language,
         },
     )
-    set_stage_status(
-        session,
-        task_id=task_id,
-        stage_name="asr",
-        status="success",
-        summary="Generated aligned transcript and Chinese subtitles",
-    )
-    return AsrStageResult(
-        audio_path=audio_path,
-        transcript_path=transcript_path,
-        subtitle_path=subtitle_path,
-        raw_alignment_path=raw_alignment_path,
-        model_metadata=model_metadata,
-        elapsed_seconds=elapsed_seconds,
-        segments=segments,
-    )
+
+
+def _deserialize_manifest_phases(raw_phases: Any) -> list[AsrPhaseResult]:
+    if not isinstance(raw_phases, list):
+        return []
+    phases: list[AsrPhaseResult] = []
+    for raw_phase in raw_phases:
+        if not isinstance(raw_phase, dict):
+            continue
+        elapsed_ms = raw_phase.get("elapsed_ms")
+        if not isinstance(elapsed_ms, int):
+            elapsed_ms = None
+        phases.append(
+            AsrPhaseResult(
+                name=str(raw_phase.get("name") or "").strip() or "unknown",
+                status=str(raw_phase.get("status") or "pending").strip() or "pending",
+                elapsed_ms=elapsed_ms,
+            )
+        )
+    return phases
+
+
+def _optional_manifest_path(value: Any) -> Path | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return Path(value)
+
+
+def _require_manifest_path(task_id: str, path: Path | None, *, kind: str) -> Path:
+    if path is None:
+        raise AsrFailure(
+            code="invalid_result_manifest",
+            message=f"ASR child result manifest is missing {kind}.",
+        )
+    try:
+        resolved = resolve_task_artifact_path(task_id, path)
+    except Exception as exc:
+        raise AsrFailure(
+            code="invalid_result_manifest",
+            message=f"ASR child result manifest referenced an unsafe {kind}: {path}",
+        ) from exc
+    if not resolved.exists():
+        raise AsrFailure(
+            code="invalid_result_manifest",
+            message=f"ASR child result manifest referenced a missing {kind}: {resolved}",
+        )
+    return resolved
+
+
+def _count_transcript_segments(transcript_path: Path) -> int:
+    try:
+        payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        raise AsrFailure(
+            code="invalid_result_manifest",
+            message=f"ASR transcript artifact is unavailable or invalid: {transcript_path}",
+        ) from exc
+    segments = payload.get("segments") if isinstance(payload, dict) else None
+    if not isinstance(segments, list):
+        raise AsrFailure(
+            code="invalid_result_manifest",
+            message=f"ASR transcript artifact is missing segments: {transcript_path}",
+        )
+    return len(segments)
+
+
+def _manifest_error_to_failure(manifest: AsrResultManifest) -> AsrFailure:
+    error = manifest.error or {}
+    code = str(error.get("code") or "asr_child_failed").strip() or "asr_child_failed"
+    message = str(error.get("message") or "ASR child reported failure.").strip() or "ASR child reported failure."
+    return AsrFailure(code=code, message=message)
+
+
+def _run_pipeline_phase(
+    *,
+    phase: str,
+    phase_results: dict[str, AsrPhaseResult],
+    observer: AsrPipelineObserver | None,
+    action: Callable[[], _PhaseValue],
+) -> _PhaseValue:
+    phase_result = phase_results[phase]
+    phase_result.status = "running"
+    phase_result.elapsed_ms = None
+    phase_index = ASR_PIPELINE_PHASE_INDEX[phase]
+    phase_count = len(ASR_PIPELINE_PHASES)
+    started_at = time.perf_counter()
+    heartbeat_stop: threading.Event | None = None
+    heartbeat_thread: threading.Thread | None = None
+    if observer is not None:
+        observer.phase_start(
+            phase,
+            phase_index=phase_index,
+            phase_count=phase_count,
+            message=f"starting {phase}",
+        )
+        observer.heartbeat(
+            phase,
+            phase_index=phase_index,
+            phase_count=phase_count,
+            elapsed_ms=0,
+            message=f"{phase} running",
+        )
+
+        def _emit_heartbeats() -> None:
+            assert heartbeat_stop is not None
+            while not heartbeat_stop.wait(ASR_PHASE_HEARTBEAT_INTERVAL_SECONDS):
+                observer.heartbeat(
+                    phase,
+                    phase_index=phase_index,
+                    phase_count=phase_count,
+                    elapsed_ms=_elapsed_ms(started_at),
+                    message=f"{phase} running",
+                )
+
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(target=_emit_heartbeats, daemon=True)
+        heartbeat_thread.start()
+    try:
+        value = action()
+    except Exception:
+        phase_result.status = "failed"
+        phase_result.elapsed_ms = _elapsed_ms(started_at)
+        raise
+    finally:
+        if heartbeat_stop is not None:
+            heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=ASR_PHASE_HEARTBEAT_INTERVAL_SECONDS * 2)
+    phase_result.status = "success"
+    phase_result.elapsed_ms = _elapsed_ms(started_at)
+    if observer is not None:
+        observer.phase_complete(
+            phase,
+            phase_index=phase_index,
+            phase_count=phase_count,
+            elapsed_ms=phase_result.elapsed_ms or 0,
+        )
+    return value
+
+
+def _resolve_failed_phase(phase_results: dict[str, AsrPhaseResult], *, fallback: str) -> str:
+    for phase in ASR_PIPELINE_PHASES:
+        if phase_results[phase].status in {"failed", "running"}:
+            return phase
+    return fallback
+
+
+def _mark_failed_phase(phase_results: dict[str, AsrPhaseResult], phase: str) -> None:
+    phase_result = phase_results[phase]
+    if phase_result.status != "pending":
+        return
+    phase_result.status = "failed"
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, round((time.perf_counter() - started_at) * 1000))
 
 
 def _build_model_metadata(settings: Settings) -> dict[str, Any]:
