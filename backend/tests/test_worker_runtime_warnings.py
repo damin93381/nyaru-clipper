@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -314,6 +316,116 @@ def test_claim_next_job_recovers_stale_running_gpu_job(backend_env, monkeypatch)
 
     ingest_log = Path(backend_env["data_dir"]) / "tasks" / stale_task_id / "logs" / "ingest.log"
     assert "worker:recovered stale running job" in ingest_log.read_text(encoding="utf-8")
+
+
+def test_claim_next_job_kills_stale_asr_process_group_before_unblocking_queue(backend_env, monkeypatch) -> None:
+    stale_task_id = _create_task("https://www.bilibili.com/video/BV1staleasr001")
+    pending_task_id = _create_task("https://www.bilibili.com/video/BV1pendingasr001")
+
+    from app.db import session_scope
+    from app.models import Task, TaskExecutionControl, TaskExecutionProgress, TaskJob, TaskStage, utc_now
+    from app.worker import claim_next_job
+
+    stale_now = utc_now() - timedelta(minutes=10)
+    monkeypatch.setenv("APP_WORKER_RUNNING_JOB_STALE_SECONDS", "60")
+    child = subprocess.Popen(["python", "-c", "import time; time.sleep(30)"], start_new_session=True)
+
+    try:
+        with session_scope() as session:
+            stale_task = session.get(Task, stale_task_id)
+            assert stale_task is not None
+            stale_task.status = "running"
+            stale_task.updated_at = stale_now
+            session.add(stale_task)
+
+            stale_job = session.exec(select(TaskJob).where(TaskJob.task_id == stale_task_id)).one()
+            stale_job.status = "running"
+            stale_job.stage_name = "asr"
+            stale_job.started_at = stale_now
+            stale_job.updated_at = stale_now
+            stale_job.finished_at = None
+            session.add(stale_job)
+
+            stale_stage = session.exec(
+                select(TaskStage).where(TaskStage.task_id == stale_task_id).where(TaskStage.name == "asr")
+            ).one()
+            stale_stage.status = "running"
+            stale_stage.started_at = stale_now
+            stale_stage.updated_at = stale_now
+            stale_stage.finished_at = None
+            session.add(stale_stage)
+
+            session.add(
+                TaskExecutionControl(
+                    task_id=stale_task_id,
+                    execution_token="token-stale-asr",
+                    active_process_group_id=child.pid,
+                    cancel_requested=False,
+                    force_kill_requested=False,
+                    heartbeat_at=stale_now,
+                )
+            )
+            session.add(
+                TaskExecutionProgress(
+                    task_id=stale_task_id,
+                    stage_name="asr",
+                    current_phase="transcribe",
+                    phase_index=3,
+                    phase_count=5,
+                    latest_message="stale progress",
+                    phase_timings_json=json.dumps(
+                        [
+                            {"name": "model_load", "status": "success", "elapsed_ms": 250},
+                            {"name": "vad", "status": "success", "elapsed_ms": 500},
+                            {"name": "transcribe", "status": "running", "elapsed_ms": 750},
+                            {"name": "align", "status": "pending", "elapsed_ms": None},
+                            {"name": "persist", "status": "pending", "elapsed_ms": None},
+                        ]
+                    ),
+                    heartbeat_at=stale_now,
+                )
+            )
+
+        claimed = claim_next_job()
+
+        assert claimed is not None
+        assert claimed.task_id == pending_task_id
+        assert claimed.stage_name == "ingest"
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and child.poll() is None:
+            time.sleep(0.05)
+
+        assert child.poll() is not None
+
+        with session_scope() as session:
+            stale_task = session.get(Task, stale_task_id)
+            stale_job = session.exec(select(TaskJob).where(TaskJob.task_id == stale_task_id)).one()
+            stale_stage = session.exec(
+                select(TaskStage).where(TaskStage.task_id == stale_task_id).where(TaskStage.name == "asr")
+            ).one()
+            control = session.get(TaskExecutionControl, stale_task_id)
+            execution_progress = session.get(TaskExecutionProgress, stale_task_id)
+            stale_task_status = stale_task.status if stale_task is not None else None
+            stale_job_status = stale_job.status
+            stale_stage_status = stale_stage.status
+            stale_stage_summary = stale_stage.summary
+            assert control is not None
+            execution_token = control.execution_token
+            active_process_group_id = control.active_process_group_id
+
+        assert stale_task is not None
+        assert stale_task_status == "failed"
+        assert stale_job_status == "failed"
+        assert stale_stage_status == "failed"
+        assert stale_stage_summary == "Recovered stale running job"
+        assert execution_token is None
+        assert active_process_group_id is None
+        assert execution_progress is None
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
 
 
 def test_claim_next_job_keeps_fresh_running_gpu_job_blocking_queue(backend_env, monkeypatch) -> None:
