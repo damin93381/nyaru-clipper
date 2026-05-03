@@ -1,20 +1,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from sqlmodel import Session, select
 
 from app.models import CANONICAL_STAGES, Task, TaskJob, TaskStage, utc_now
-from app.repositories.tasks import get_task_record
-from app.services.asr_whisperx import transcribe_task_audio
+from app.repositories.tasks import clear_task_execution_progress, get_task_record, upsert_task_execution_progress
+from app.services.asr_child_runner import build_asr_child_command
+from app.services.asr_whisperx import (
+    ASR_PIPELINE_PHASES,
+    ASR_STAGE_SUCCESS_SUMMARY,
+    AsrFailure,
+    load_asr_result_manifest,
+    publish_asr_artifacts_from_manifest,
+)
 from app.services.downloader import download_bilibili_vod
 from app.services.highlights import analyze_task_highlights
 from app.services.media_prep import prepare_media_for_asr
-from app.services.pipeline_support import append_stage_log
+from app.services.pipeline_support import append_stage_log, run_tracked_structured_process_group_command
 from app.services.reporting import generate_task_report
 from app.services.storage import ensure_task_dirs, log_file_for_stage
+from app.services.task_control import (
+    StaleExecutionTokenError,
+    bind_execution_context,
+    clear_execution_context,
+    ensure_current_execution_context,
+    finalize_execution,
+    finalize_cancelled,
+    get_control_requests,
+    get_execution_context,
+)
 from app.services.translation_provider import translate_task_subtitles
 
 CANONICAL_STAGE_ORDER = CANONICAL_STAGES
@@ -74,6 +92,122 @@ def _execute_media_prep(session: Session, task_id: str):
     return prepare_media_for_asr(session, task_id, _resolve_ingest_video_path(task_id, session))
 
 
+@dataclass
+class _AsrExecutionProgressTracker:
+    session: Session
+    task_id: str
+
+    def __post_init__(self) -> None:
+        self._phase_timings = [
+            {"name": phase, "status": "pending", "elapsed_ms": None} for phase in ASR_PIPELINE_PHASES
+        ]
+        self._current_phase = ASR_PIPELINE_PHASES[0]
+        self._latest_message: str | None = None
+        self._phase_started_at: datetime | None = None
+        self._heartbeat_at: datetime | None = None
+
+    def handle_event(self, event: dict[str, Any]) -> None:
+        event_name = str(event.get("event") or "").strip()
+        phase = str(event.get("phase") or self._current_phase).strip() or self._current_phase
+        phase_index = _coerce_phase_index(event.get("phase_index"), phase=phase)
+        phase_count = _coerce_phase_count(event.get("phase_count"))
+        event_time = _parse_event_timestamp(event.get("ts")) or utc_now()
+
+        if event_name == "phase_start":
+            self._current_phase = phase
+            self._phase_started_at = event_time
+            self._heartbeat_at = event_time
+            self._latest_message = _coerce_message(event.get("message"))
+            _set_phase_state(self._phase_timings, phase=phase, status="running", elapsed_ms=None)
+        elif event_name == "heartbeat":
+            self._current_phase = phase
+            self._heartbeat_at = event_time
+            self._latest_message = _coerce_message(event.get("message"))
+            _set_phase_state(
+                self._phase_timings,
+                phase=phase,
+                status="running",
+                elapsed_ms=_coerce_elapsed_ms(event.get("elapsed_ms")),
+            )
+        elif event_name == "phase_complete":
+            self._current_phase = phase
+            self._heartbeat_at = event_time
+            _set_phase_state(
+                self._phase_timings,
+                phase=phase,
+                status="success",
+                elapsed_ms=_coerce_elapsed_ms(event.get("elapsed_ms")),
+            )
+        elif event_name == "failure":
+            self._current_phase = phase
+            self._heartbeat_at = event_time
+            self._latest_message = _coerce_message(event.get("message"))
+            _set_phase_state(self._phase_timings, phase=phase, status="failed", elapsed_ms=None)
+        elif event_name == "success":
+            self._current_phase = phase
+            self._heartbeat_at = event_time
+            _set_phase_state(
+                self._phase_timings,
+                phase=phase,
+                status="success",
+                elapsed_ms=_coerce_elapsed_ms(event.get("elapsed_ms_total")),
+            )
+        else:
+            return
+
+        upsert_task_execution_progress(
+            self.session,
+            task_id=self.task_id,
+            stage_name="asr",
+            current_phase=self._current_phase,
+            phase_index=phase_index,
+            phase_count=phase_count,
+            latest_message=self._latest_message,
+            phase_started_at=self._phase_started_at,
+            heartbeat_at=self._heartbeat_at,
+            phase_timings=self._phase_timings,
+        )
+        self.session.commit()
+
+
+def _execute_asr_subprocess(session: Session, task_id: str) -> StageDirective:
+    record = get_task_record(session, task_id)
+    if record is None:
+        raise ValueError(f"Unknown task_id: {task_id}")
+
+    log_path = log_file_for_stage(task_id, "asr")
+    progress_tracker = _AsrExecutionProgressTracker(session=session, task_id=task_id)
+    clear_task_execution_progress(session, task_id=task_id)
+    session.commit()
+
+    try:
+        process_result = run_tracked_structured_process_group_command(
+            session,
+            task_id=task_id,
+            args=build_asr_child_command(task_id),
+            log_path=log_path,
+            on_event=progress_tracker.handle_event,
+        )
+        success_event = _resolve_success_event(process_result.events)
+        if process_result.completed_process.returncode != 0:
+            raise _resolve_child_failure(task_id=task_id, events=process_result.events)
+        if success_event is None:
+            raise AsrFailure(
+                code="asr_child_failed",
+                message="ASR child exited without emitting a terminal success event.",
+            )
+        manifest_path = _resolve_success_manifest_path(success_event)
+        _ensure_current_execution_context_if_bound(session, task_id=task_id)
+        manifest = load_asr_result_manifest(manifest_path)
+        publish_asr_artifacts_from_manifest(session, task_id=task_id, manifest=manifest)
+        _ensure_current_execution_context_if_bound(session, task_id=task_id)
+        session.commit()
+        return StageDirective(status="success", summary=ASR_STAGE_SUCCESS_SUMMARY)
+    finally:
+        clear_task_execution_progress(session, task_id=task_id)
+        session.commit()
+
+
 def _execute_export(session: Session, task_id: str) -> StageDirective:
     return StageDirective(status="skipped", summary="Awaiting user-confirmed clip export")
 
@@ -81,7 +215,7 @@ def _execute_export(session: Session, task_id: str) -> StageDirective:
 STAGE_EXECUTORS: dict[str, StageExecutor] = {
     "ingest": _execute_ingest,
     "media_prep": _execute_media_prep,
-    "asr": transcribe_task_audio,
+    "asr": _execute_asr_subprocess,
     "translation": translate_task_subtitles,
     "highlight": analyze_task_highlights,
     "export": _execute_export,
@@ -95,83 +229,124 @@ def run_task_pipeline(
     *,
     start_stage_name: str | None = None,
     claimed_stage_running: bool = False,
+    execution_token: str | None = None,
 ) -> TaskRunResult:
-    task = session.get(Task, task_id)
-    if task is None:
-        raise ValueError(f"Unknown task_id: {task_id}")
-    job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).first()
-    if job is None:
-        raise ValueError(f"Task job not found for task_id: {task_id}")
+    if execution_token is not None:
+        bind_execution_context(session, task_id=task_id, execution_token=execution_token)
 
-    stages = _load_stage_map(session, task_id)
-    first_stage_name = start_stage_name or job.stage_name or _first_incomplete_stage_name(stages)
-    if first_stage_name not in CANONICAL_STAGE_ORDER:
-        raise ValueError(f"Unknown stage: {first_stage_name}")
+    try:
+        task = session.get(Task, task_id)
+        if task is None:
+            raise ValueError(f"Unknown task_id: {task_id}")
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).first()
+        if job is None:
+            raise ValueError(f"Task job not found for task_id: {task_id}")
 
-    completed_stages: list[str] = []
-    start_index = CANONICAL_STAGE_ORDER.index(first_stage_name)
-    for index in range(start_index, len(CANONICAL_STAGE_ORDER)):
-        stage_name = CANONICAL_STAGE_ORDER[index]
-        stage = stages[stage_name]
-        log_path = log_file_for_stage(task_id, stage_name)
+        stages = _load_stage_map(session, task_id)
+        first_stage_name = start_stage_name or job.stage_name or _first_incomplete_stage_name(stages)
+        if first_stage_name not in CANONICAL_STAGE_ORDER:
+            raise ValueError(f"Unknown stage: {first_stage_name}")
 
-        if index == start_index and claimed_stage_running:
-            _sync_running_claim(task=task, job=job, stage=stage)
-            session.add(task)
-            session.add(job)
-            session.add(stage)
-        else:
-            _mark_stage_running(task=task, job=job, stage=stage)
-            session.add(task)
-            session.add(job)
-            session.add(stage)
-            session.commit()
-            stages = _load_stage_map(session, task_id)
-            stage = stages[stage_name]
-
-        append_stage_log(log_path, f"task_runner:start stage={stage_name}")
+        completed_stages: list[str] = []
+        start_index = CANONICAL_STAGE_ORDER.index(first_stage_name)
 
         try:
-            outcome = STAGE_EXECUTORS[stage_name](session, task_id)
-        except Exception as exc:
-            append_stage_log(log_path, f"task_runner:error {exc}")
-            _mark_stage_failed(task=task, job=job, stage=stage, summary=str(exc) or exc.__class__.__name__)
-            session.add(task)
-            session.add(job)
-            session.add(stage)
-            session.commit()
-            raise
+            _ensure_current_execution_context_if_bound(session, task_id=task_id)
+            if _finalize_cancelled_if_requested(session, task_id=task_id):
+                return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
 
-        directive = outcome if isinstance(outcome, StageDirective) else None
-        if directive is not None:
-            _apply_stage_directive(stage=stage, directive=directive)
-        elif stage.status not in {"success", "skipped"}:
-            _mark_stage_success(stage, summary=f"Completed {stage_name}")
+            for index in range(start_index, len(CANONICAL_STAGE_ORDER)):
+                stage_name = CANONICAL_STAGE_ORDER[index]
+                stage = stages[stage_name]
+                log_path = log_file_for_stage(task_id, stage_name)
 
-        _advance_job_checkpoint(job=job, next_stage_name=_next_stage_name(index))
-        task.status = "running" if index < len(CANONICAL_STAGE_ORDER) - 1 else "success"
-        task.updated_at = utc_now()
-        session.add(task)
-        session.add(job)
-        session.add(stage)
-        session.commit()
-        append_stage_log(log_path, f"task_runner:complete stage={stage_name} status={stage.status}")
-        completed_stages.append(stage_name)
-        stages = _load_stage_map(session, task_id)
+                _ensure_current_execution_context_if_bound(session, task_id=task_id)
+                if _finalize_cancelled_if_requested(session, task_id=task_id):
+                    return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
 
-    final_stage = stages[CANONICAL_STAGE_ORDER[-1]]
-    if final_stage.status in {"success", "skipped"}:
-        job.status = "success"
-        job.stage_name = CANONICAL_STAGE_ORDER[-1]
-        job.finished_at = utc_now()
-        job.updated_at = job.finished_at
-        task.status = "success"
-        task.updated_at = job.finished_at
-        session.add(job)
-        session.add(task)
-        session.commit()
+                if index == start_index and claimed_stage_running:
+                    _sync_running_claim(task=task, job=job, stage=stage)
+                    session.add(task)
+                    session.add(job)
+                    session.add(stage)
+                else:
+                    _mark_stage_running(task=task, job=job, stage=stage)
+                    session.add(task)
+                    session.add(job)
+                    session.add(stage)
+                    session.commit()
+                    stages = _load_stage_map(session, task_id)
+                    stage = stages[stage_name]
 
-    return TaskRunResult(task_id=task_id, final_status=task.status, completed_stages=completed_stages)
+                append_stage_log(log_path, f"task_runner:start stage={stage_name}")
+
+                try:
+                    outcome = STAGE_EXECUTORS[stage_name](session, task_id)
+                    _ensure_current_execution_context_if_bound(session, task_id=task_id)
+                except StaleExecutionTokenError:
+                    session.rollback()
+                    return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
+                except Exception as exc:
+                    append_stage_log(log_path, f"task_runner:error {exc}")
+                    _mark_stage_failed(
+                        task=task,
+                        job=job,
+                        stage=stage,
+                        summary=_failure_summary(exc),
+                    )
+                    session.add(task)
+                    session.add(job)
+                    session.add(stage)
+                    session.commit()
+                    raise
+
+                directive = outcome if isinstance(outcome, StageDirective) else None
+                if directive is not None:
+                    _apply_stage_directive(stage=stage, directive=directive)
+                elif stage.status not in {"success", "skipped"}:
+                    _mark_stage_success(stage, summary=f"Completed {stage_name}")
+
+                if _finalize_cancelled_if_requested(session, task_id=task_id):
+                    session.commit()
+                    completed_stages.append(stage_name)
+                    append_stage_log(log_path, f"task_runner:complete stage={stage_name} status={stage.status}")
+                    return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
+
+                _advance_job_checkpoint(job=job, next_stage_name=_next_stage_name(index))
+                task.status = "running" if index < len(CANONICAL_STAGE_ORDER) - 1 else "success"
+                task.updated_at = utc_now()
+                session.add(task)
+                session.add(job)
+                session.add(stage)
+                session.commit()
+                append_stage_log(log_path, f"task_runner:complete stage={stage_name} status={stage.status}")
+                completed_stages.append(stage_name)
+                stages = _load_stage_map(session, task_id)
+
+            final_stage = stages[CANONICAL_STAGE_ORDER[-1]]
+            if final_stage.status in {"success", "skipped"}:
+                job.status = "success"
+                job.stage_name = CANONICAL_STAGE_ORDER[-1]
+                job.finished_at = utc_now()
+                job.updated_at = job.finished_at
+                task.status = "success"
+                task.updated_at = job.finished_at
+                session.add(job)
+                session.add(task)
+                session.commit()
+        except StaleExecutionTokenError:
+            session.rollback()
+            return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
+
+        return TaskRunResult(task_id=task_id, final_status=task.status, completed_stages=completed_stages)
+    finally:
+        if execution_token is not None:
+            try:
+                finalize_execution(session, task_id=task_id, execution_token=execution_token)
+                session.commit()
+            except (StaleExecutionTokenError, RuntimeError, ValueError):
+                session.rollback()
+            clear_execution_context(session)
 
 
 def _load_stage_map(session: Session, task_id: str) -> dict[str, TaskStage]:
@@ -260,3 +435,140 @@ def _next_stage_name(index: int) -> str | None:
     if next_index >= len(CANONICAL_STAGE_ORDER):
         return None
     return CANONICAL_STAGE_ORDER[next_index]
+
+
+def _coerce_phase_index(value: Any, *, phase: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = ASR_PIPELINE_PHASES.index(phase) + 1 if phase in ASR_PIPELINE_PHASES else 1
+    return max(1, parsed)
+
+
+def _coerce_phase_count(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = len(ASR_PIPELINE_PHASES)
+    return max(1, parsed)
+
+
+def _coerce_elapsed_ms(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0, parsed)
+
+
+def _coerce_message(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _set_phase_state(
+    phases: list[dict[str, Any]],
+    *,
+    phase: str,
+    status: str,
+    elapsed_ms: int | None,
+) -> None:
+    for item in phases:
+        if item.get("name") != phase:
+            continue
+        item["status"] = status
+        item["elapsed_ms"] = elapsed_ms
+        return
+
+
+def _parse_event_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _resolve_success_event(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for event in reversed(events):
+        if event.get("event") == "success":
+            return event
+    return None
+
+
+def _resolve_success_manifest_path(success_event: dict[str, Any]) -> Path:
+    manifest_path = success_event.get("manifest_path")
+    if not isinstance(manifest_path, str) or not manifest_path.strip():
+        raise AsrFailure(
+            code="asr_child_failed",
+            message="ASR child success event did not include a manifest path.",
+        )
+    return Path(manifest_path)
+
+
+def _resolve_child_failure(*, task_id: str, events: list[dict[str, Any]]) -> AsrFailure:
+    for event in reversed(events):
+        if event.get("event") == "failure":
+            code = str(event.get("code") or "asr_child_failed").strip() or "asr_child_failed"
+            message = str(event.get("message") or "ASR child reported failure.").strip() or "ASR child reported failure."
+            return AsrFailure(code=code, message=message)
+
+    manifest_path = ensure_task_dirs(task_id)["work"] / "asr-result.json"
+    if manifest_path.exists():
+        manifest = load_asr_result_manifest(manifest_path)
+        if manifest.status != "success":
+            error = manifest.error or {}
+            return AsrFailure(
+                code=str(error.get("code") or "asr_child_failed"),
+                message=str(error.get("message") or "ASR child reported failure."),
+            )
+    return AsrFailure(
+        code="asr_child_failed",
+        message=f"ASR child exited unsuccessfully for task {task_id}.",
+    )
+
+
+def _failure_summary(exc: Exception) -> str:
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and code.strip():
+        return code.strip()
+    return str(exc) or exc.__class__.__name__
+
+
+def _ensure_current_execution_context_if_bound(session: Session, *, task_id: str) -> None:
+    context = get_execution_context(session)
+    if context is None:
+        return
+    ensure_current_execution_context(session, task_id=task_id)
+
+
+def _finalize_cancelled_if_requested(session: Session, *, task_id: str) -> bool:
+    context = get_execution_context(session)
+    if context is None:
+        return False
+    ensure_current_execution_context(session, task_id=task_id)
+    requests = get_control_requests(session, task_id=task_id)
+    if not (requests.cancel_requested or requests.force_kill_requested):
+        return False
+    control_token = context.get("execution_token")
+    if not isinstance(control_token, str):
+        return False
+    finalize_cancelled(session, task_id=task_id, execution_token=control_token)
+    return True
+
+
+def _current_run_result(session: Session, *, task_id: str, completed_stages: list[str]) -> TaskRunResult:
+    task = session.get(Task, task_id)
+    final_status = task.status if task is not None else "pending"
+    return TaskRunResult(
+        task_id=task_id,
+        final_status=final_status,
+        completed_stages=list(completed_stages),
+    )
