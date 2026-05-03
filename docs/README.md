@@ -25,3 +25,5 @@ Available documents:
 The deployment guides are the fastest way to reach the supported local and self-hosted workflows. If you need WSL + ROCm, start from the deployment guides first, then use the operator manuals after the stack is up and reachable.
 
 The English and Chinese manuals are kept as parallel document sets so operators and users can work in either language without losing MVP scope fidelity.
+
+The operator and deployment guides now also document the current ASR lifecycle observability contract, including active phase timing visibility, `cancel_requested` overlay behavior, and the narrower `force-kill` availability rules.

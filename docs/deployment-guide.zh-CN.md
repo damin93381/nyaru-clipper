@@ -380,6 +380,25 @@ warning 的含义如下：
 
 如果缺少 `torch`、`transformers`、`whisperx` 这类核心 Python 依赖，能力接口可能返回 `status: "error"`。这个状态依然是观测性的，不会把启动过程变成硬阻塞，但在补齐依赖前，系统并不适合执行真实处理任务。
 
+## 启动后的 ASR 生命周期可观测性
+
+当整套服务启动后，操作人员可以通过任务详情查看活动中的 ASR 生命周期状态。
+
+这一阶段新增的可见性包括：
+
+- 活动中的 `asr` 任务可以暴露 `execution_progress`
+- 这个载荷可以显示当前 ASR phase、耗时、heartbeat 和最新进度消息
+- 当 ASR 子进程还在收尾时，任务详情可以先显示 `cancel_requested`
+- 只有后端仍然持有活动 `asr` 子进程的真实 tracked process group 时，才会暴露 `force-kill`
+
+解释规则如下：
+
+- 如果任务详情已经显示 `cancel_requested`，但阶段列表仍然显示运行中的 `asr`，应理解为取消请求已被接受，当前还在排空和清理
+- 如果 `force-kill` 没有出现，不要直接判断取消能力失效，因为当前运行可能已经没有一个安全、可确认的 tracked process group 可供升级终止
+- 如果后端当前没有跟踪到活动中的 ASR 执行，那么 `execution_progress` 可以完全不存在
+
+这一阶段不会改变 CPU 或 GPU 的调优行为。当前用于保质量的模型、设备和计算默认值保持不变，性能优化工作仍然不在本阶段范围内。
+
 ## 验证命令
 
 主路径验证：

@@ -380,6 +380,25 @@ Warning semantics:
 
 If core Python dependencies such as `torch`, `transformers`, or `whisperx` are missing, the capability payload can report `status: "error"`. That status is still observational. It does not turn the startup sequence into a hard block, but the system is not ready for real processing until the missing dependency is installed.
 
+## ASR lifecycle observability after startup
+
+After the stack is running, operators can inspect active ASR lifecycle state from task detail.
+
+What is new in this phase:
+
+- active `asr` runs can expose `execution_progress`
+- that payload can surface the current ASR phase, timing, heartbeat, and latest progress message
+- task detail can show `cancel_requested` while the ASR child process is still winding down
+- `force-kill` is exposed only when the backend still has a real tracked process group for the active `asr` child
+
+Interpretation rules:
+
+- if task detail shows `cancel_requested` but stage rows still show running `asr`, treat that as an accepted cancel request that is still draining
+- if `force-kill` is missing, do not assume cancel support is broken, because the active run may no longer have a safe tracked process group to target
+- if no live ASR execution is being tracked, `execution_progress` can be absent entirely
+
+This phase does not change CPU or GPU tuning behavior. It keeps the current quality-preserving model, device, and compute defaults. Performance optimization work is out of scope here.
+
 ## Verification commands
 
 Primary local path:
