@@ -196,6 +196,62 @@ The canonical backend stage order is:
 
 In the current MVP, pipeline `export` is intentionally marked as skipped until the user confirms a clip through `POST /api/tasks/{task_id}/clips`.
 
+## ASR lifecycle visibility and cancellation semantics
+
+During an active `asr` stage, task detail can expose an optional `execution_progress` object.
+
+Operators should treat it as an active-ASR view only:
+
+- it appears only when the backend is tracking a live ASR execution
+- it can include the current ASR phase, phase start time, latest heartbeat, and per-phase elapsed timing
+- it is cleared again after terminal cleanup, retry from `asr` or earlier, or stale-worker recovery
+
+The phase model is more detailed than the top-level pipeline stage list. While the task stays in stage `asr`, the active child process can report its current ASR phase and timing so operators can distinguish slow progress from a stuck run.
+
+### How to read `cancel_requested` during active ASR
+
+`cancel_requested` is a task-detail overlay status.
+
+What that means in practice:
+
+- task detail can show `cancel_requested` while the active ASR child process is still winding down
+- raw stage rows can still show the underlying running `asr` stage during that same window
+- this is expected, because the cancellation request has been accepted but the child process has not finished cleanup yet
+
+Use the task-detail status plus `execution_progress` to understand an in-flight ASR cancel. Do not interpret a running `asr` stage row by itself as proof that the cancel request was ignored.
+
+### When `force-kill` is available
+
+`force-kill` is intentionally narrower than ordinary cancel.
+
+It is available only when both of these conditions are true:
+
+- the active job is currently in `asr`
+- the backend still has a real tracked process group ID for that ASR child process
+
+If either condition is false, `force-kill` may be absent. Common reasons include:
+
+- the task is no longer in active `asr`
+- the child process already exited
+- the current run was never associated with a tracked process group
+- stale-worker recovery already cleared the control record after making the termination attempt
+
+Absence of `force-kill` does not mean cancellation is unsupported. It means the backend no longer has a safe tracked process group that it can target for an escalation request.
+
+### Scope boundary for this phase
+
+This ASR lifecycle work improves interruption handling and observability only.
+
+It does not change the current quality-preserving defaults for:
+
+- WhisperX model choice
+- ASR device selection
+- compute type
+- translation model selection
+- CPU or GPU tuning behavior
+
+Cold starts, model downloads, and degraded CPU fallback behavior remain the same as before. CPU or GPU performance tuning is out of scope for this phase.
+
 ## Runtime capability visibility
 
 Runtime capability checks are non-blocking visibility signals.
