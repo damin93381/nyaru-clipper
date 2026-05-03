@@ -14,15 +14,50 @@ export const CANONICAL_STAGES = [
 	"report",
 ] as const;
 
-export const TERMINAL_STATUSES = ["success", "failed", "skipped"] as const;
+export const TERMINAL_STATUSES = ["success", "failed", "cancelled", "skipped"] as const;
 
 export type TaskStageName = (typeof CANONICAL_STAGES)[number];
 export type TaskStatus =
 	| "pending"
 	| "running"
+	| "cancel_requested"
 	| "success"
 	| "failed"
+	| "cancelled"
 	| "skipped";
+
+export const ASR_EXECUTION_PHASES = [
+	"model_load",
+	"vad",
+	"transcribe",
+	"align",
+	"persist",
+] as const;
+
+export type AsrExecutionPhaseName = (typeof ASR_EXECUTION_PHASES)[number];
+export type ExecutionProgressStageName = "asr";
+export type ExecutionProgressPhaseStatus =
+	| "pending"
+	| "running"
+	| "success"
+	| "failed";
+
+export interface ExecutionProgressPhase {
+	name: AsrExecutionPhaseName;
+	status: ExecutionProgressPhaseStatus;
+	elapsed_ms: number | null;
+}
+
+export interface TaskExecutionProgress {
+	stage_name: ExecutionProgressStageName;
+	current_phase: AsrExecutionPhaseName;
+	phase_index: number;
+	phase_count: number;
+	phase_started_at: string | null;
+	heartbeat_at: string | null;
+	latest_message: string | null;
+	phases: ExecutionProgressPhase[];
+}
 
 export interface TaskStageRecord {
 	name: TaskStageName;
@@ -38,6 +73,7 @@ export interface TaskDetail {
 	source_video_id: string | null;
 	status: TaskStatus;
 	stages: TaskStageRecord[];
+	execution_progress?: TaskExecutionProgress;
 	failure_recovery?: AsrMissingModelRecovery;
 	created?: boolean;
 }

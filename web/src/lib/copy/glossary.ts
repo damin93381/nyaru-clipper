@@ -15,8 +15,10 @@ export const GLOSSARY_TERMS = {
 export const TASK_STATUS_LABELS = {
   pending: "待处理",
   running: "运行中",
+  cancel_requested: "取消请求中",
   success: "成功",
   failed: "失败",
+  cancelled: "已取消",
   skipped: "已跳过",
 } as const;
 
