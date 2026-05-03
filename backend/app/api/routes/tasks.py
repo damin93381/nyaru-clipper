@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import mimetypes
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
-from typing import Literal
 from sqlmodel import Session
 
 from app.db import get_session
+from app.models import TaskExecutionControl
 from app.repositories.tasks import (
     create_task,
     get_task_artifact,
@@ -22,9 +23,23 @@ from app.repositories.tasks import (
 from app.services.clip_export import ClipExportFailure, export_confirmed_clip
 from app.services.asr_whisperx import download_asr_missing_models
 from app.services.storage import build_artifact_content_path, resolve_task_artifact_path
+from app.services.task_control import can_force_kill, request_cancel, request_force_kill
 from app.settings import get_settings
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def _load_task_execution_control(session: Session, *, task_id: str) -> TaskExecutionControl | None:
+    return session.get(TaskExecutionControl, task_id)
+
+
+def _overlay_control_status(detail: dict[str, Any], *, control: TaskExecutionControl | None) -> dict[str, Any]:
+    if control is None:
+        return detail
+    if detail.get("status") == "running" and (control.cancel_requested or control.force_kill_requested):
+        detail = dict(detail)
+        detail["status"] = "cancel_requested"
+    return detail
 
 
 class CreateTaskRequest(BaseModel):
@@ -58,11 +73,41 @@ def create_task_endpoint(
 
 
 @router.get("/{task_id}")
-def task_detail_endpoint(task_id: str, session: Session = Depends(get_session)) -> dict:
+def task_detail_endpoint(task_id: str, session: Session = Depends(get_session)) -> dict[str, Any]:
     task = get_task_detail(session, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return task
+    control = _load_task_execution_control(session, task_id=task_id)
+    return _overlay_control_status(task, control=control)
+
+
+@router.post("/{task_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+def task_cancel_endpoint(task_id: str, session: Session = Depends(get_session)) -> dict[str, str]:
+    record = get_task_record(session, task_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    try:
+        request_cancel(session, task_id=task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task is not actively cancellable") from exc
+    return {"task_id": task_id, "status": "cancel_requested"}
+
+
+@router.post("/{task_id}/force-kill", status_code=status.HTTP_202_ACCEPTED)
+def task_force_kill_endpoint(task_id: str, session: Session = Depends(get_session)) -> dict[str, str]:
+    record = get_task_record(session, task_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if not can_force_kill(session, task_id=task_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Task is not currently force-killable",
+        )
+    try:
+        request_force_kill(session, task_id=task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task is not actively cancellable") from exc
+    return {"task_id": task_id, "status": "cancel_requested"}
 
 
 @router.get("/{task_id}/stages")

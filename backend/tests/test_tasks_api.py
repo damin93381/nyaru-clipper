@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -249,6 +251,281 @@ def test_task_detail_failure_recovery_reports_asr_missing_model(client: TestClie
     assert body["failure_recovery"]["stage"] == "asr"
     assert body["failure_recovery"]["kind"] == "missing_model"
     assert [model["key"] for model in body["failure_recovery"]["models"]] == ["whisperx", "alignment"]
+
+
+def test_task_detail_omits_execution_progress_when_no_tracked_row_exists(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1noprogress001"},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["task_id"]
+
+    detail_response = client.get(f"/api/tasks/{task_id}")
+
+    assert detail_response.status_code == 200
+    assert "execution_progress" not in detail_response.json()
+
+
+def test_task_detail_includes_execution_progress_for_active_asr_task(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1progress001"},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["task_id"]
+
+    import app.models as app_models
+    from app.db import session_scope
+
+    progress_model = getattr(app_models, "TaskExecutionProgress", None)
+    assert progress_model is not None
+
+    phase_started_at = datetime(2026, 5, 3, 5, 0, tzinfo=timezone.utc)
+    heartbeat_at = datetime(2026, 5, 3, 5, 1, tzinfo=timezone.utc)
+    phase_timings = [
+        {"name": "model_load", "status": "success", "elapsed_ms": 1234},
+        {"name": "vad", "status": "success", "elapsed_ms": 4567},
+        {"name": "transcribe", "status": "running", "elapsed_ms": 8901},
+        {"name": "align", "status": "pending", "elapsed_ms": None},
+        {"name": "persist", "status": "pending", "elapsed_ms": None},
+    ]
+
+    with session_scope() as session:
+        session.add(
+            progress_model(
+                task_id=task_id,
+                stage_name="asr",
+                current_phase="transcribe",
+                phase_index=3,
+                phase_count=5,
+                latest_message="transcribe running",
+                phase_started_at=phase_started_at,
+                heartbeat_at=heartbeat_at,
+                phase_timings_json=json.dumps(phase_timings),
+            )
+        )
+
+    detail_response = client.get(f"/api/tasks/{task_id}")
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["execution_progress"] == {
+        "stage_name": "asr",
+        "current_phase": "transcribe",
+        "phase_index": 3,
+        "phase_count": 5,
+        "phase_started_at": "2026-05-03T05:00:00+00:00",
+        "heartbeat_at": "2026-05-03T05:01:00+00:00",
+        "latest_message": "transcribe running",
+        "phases": phase_timings,
+    }
+
+
+def test_task_cancel_overlay_and_force_kill_require_tracked_asr_process_group(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1cancelcontrol001"},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["task_id"]
+
+    from app.db import session_scope
+    from app.models import Task, TaskExecutionControl, TaskJob, TaskStage
+
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.status = "running"
+        session.add(task)
+
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+        job.status = "running"
+        job.stage_name = "asr"
+        session.add(job)
+
+        asr_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "asr")
+        ).one()
+        asr_stage.status = "running"
+        session.add(asr_stage)
+
+        session.add(
+            TaskExecutionControl(
+                task_id=task_id,
+                execution_token="token-asr-cancel",
+                active_process_group_id=None,
+                cancel_requested=False,
+                force_kill_requested=False,
+            )
+        )
+
+    cancel_response = client.post(f"/api/tasks/{task_id}/cancel")
+    assert cancel_response.status_code == 202
+
+    detail_response = client.get(f"/api/tasks/{task_id}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["status"] == "cancel_requested"
+    assert next(stage for stage in detail_payload["stages"] if stage["name"] == "asr")["status"] == "running"
+
+    force_kill_response = client.post(f"/api/tasks/{task_id}/force-kill")
+    assert force_kill_response.status_code == 409
+
+    with session_scope() as session:
+        control = session.get(TaskExecutionControl, task_id)
+        assert control is not None
+        assert control.cancel_requested is True
+        control.active_process_group_id = 424242
+        session.add(control)
+
+    force_kill_response = client.post(f"/api/tasks/{task_id}/force-kill")
+    assert force_kill_response.status_code == 202
+
+    with session_scope() as session:
+        control = session.get(TaskExecutionControl, task_id)
+        assert control is not None
+        assert control.force_kill_requested is True
+
+
+def test_task_force_kill_rejects_non_asr_stage_even_with_tracked_process_group(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1forcekillmedia001"},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["task_id"]
+
+    from app.db import session_scope
+    from app.models import Task, TaskExecutionControl, TaskJob, TaskStage
+
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.status = "running"
+        session.add(task)
+
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+        job.status = "running"
+        job.stage_name = "media_prep"
+        session.add(job)
+
+        media_prep_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "media_prep")
+        ).one()
+        media_prep_stage.status = "running"
+        session.add(media_prep_stage)
+
+        session.add(
+            TaskExecutionControl(
+                task_id=task_id,
+                execution_token="token-media-prep-force-kill",
+                active_process_group_id=31337,
+                cancel_requested=False,
+                force_kill_requested=False,
+            )
+        )
+
+    force_kill_response = client.post(f"/api/tasks/{task_id}/force-kill")
+    assert force_kill_response.status_code == 409
+
+    with session_scope() as session:
+        control = session.get(TaskExecutionControl, task_id)
+        assert control is not None
+        assert control.force_kill_requested is False
+
+
+def test_task_force_kill_rejects_non_running_asr_even_with_tracked_process_group(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1forcekillstale001"},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["task_id"]
+
+    from app.db import session_scope
+    from app.models import Task, TaskExecutionControl, TaskJob, TaskStage
+
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.status = "failed"
+        session.add(task)
+
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+        job.status = "failed"
+        job.stage_name = "asr"
+        session.add(job)
+
+        asr_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "asr")
+        ).one()
+        asr_stage.status = "failed"
+        session.add(asr_stage)
+
+        session.add(
+            TaskExecutionControl(
+                task_id=task_id,
+                execution_token="token-stale-asr-force-kill",
+                active_process_group_id=31338,
+                cancel_requested=False,
+                force_kill_requested=False,
+            )
+        )
+
+    force_kill_response = client.post(f"/api/tasks/{task_id}/force-kill")
+    assert force_kill_response.status_code == 409
+
+    with session_scope() as session:
+        control = session.get(TaskExecutionControl, task_id)
+        assert control is not None
+        assert control.force_kill_requested is False
+
+
+def test_task_cancel_rejects_stale_inactive_control_row(client: TestClient) -> None:
+    response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1cancelstale001"},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["task_id"]
+
+    from app.db import session_scope
+    from app.models import Task, TaskExecutionControl, TaskJob, TaskStage
+
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.status = "failed"
+        session.add(task)
+
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+        job.status = "failed"
+        job.stage_name = "asr"
+        session.add(job)
+
+        asr_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "asr")
+        ).one()
+        asr_stage.status = "failed"
+        session.add(asr_stage)
+
+        session.add(
+            TaskExecutionControl(
+                task_id=task_id,
+                execution_token="token-stale-asr-cancel",
+                active_process_group_id=424243,
+                cancel_requested=False,
+                force_kill_requested=False,
+            )
+        )
+
+    cancel_response = client.post(f"/api/tasks/{task_id}/cancel")
+    assert cancel_response.status_code == 409
+
+    with session_scope() as session:
+        control = session.get(TaskExecutionControl, task_id)
+        assert control is not None
+        assert control.cancel_requested is False
 
 
 def test_asr_model_download_returns_accepted_model_status_payload(client: TestClient) -> None:

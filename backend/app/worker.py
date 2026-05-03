@@ -6,14 +6,21 @@ import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Callable
+from uuid import uuid4
 
 from sqlmodel import select
 
 from app.db import session_scope
 from app.models import Task, TaskJob, TaskStage, utc_now
+from app.repositories.tasks import clear_task_execution_progress
 from app.services import capability_checks
 from app.services.pipeline_support import append_stage_log
 from app.services.storage import log_file_for_stage
+from app.services.task_control import (
+    activate_execution,
+    best_effort_kill_active_process_group,
+    clear_execution_control,
+)
 from app.services.task_runner import run_task_pipeline
 
 
@@ -89,7 +96,7 @@ def _mark_job_stale_failed(session, job: TaskJob) -> None:
         select(TaskStage)
         .where(TaskStage.task_id == job.task_id)
         .where(TaskStage.name == job.stage_name)
-    ).first()
+        ).first()
 
     job.status = "failed"
     job.finished_at = now
@@ -119,6 +126,15 @@ def _recover_stale_running_jobs(session) -> None:
         job_updated_at = _normalize_comparable_datetime(job.updated_at)
         if job_updated_at is None or job_updated_at > stale_before:
             continue
+        if job.stage_name == "asr":
+            terminated_process_group_id = best_effort_kill_active_process_group(session, task_id=job.task_id)
+            if terminated_process_group_id is not None:
+                append_stage_log(
+                    log_file_for_stage(job.task_id, job.stage_name),
+                    f"worker:terminated stale asr process group={terminated_process_group_id}",
+                )
+            clear_execution_control(session, task_id=job.task_id)
+            clear_task_execution_progress(session, task_id=job.task_id)
         _mark_job_stale_failed(session, job)
 
 
@@ -196,13 +212,16 @@ def run_worker_iteration(processor: Callable[[ClaimedJob], bool] | None = None) 
         return None
     if processor is None:
         preflight_runtime_summary = _surface_preflight_runtime_summary(claimed_job.task_id, claimed_job.stage_name)
+        execution_token = f"exec-{uuid4().hex}"
         with session_scope() as session:
+            activate_execution(session, task_id=claimed_job.task_id, execution_token=execution_token)
             try:
                 run_task_pipeline(
                     session,
                     claimed_job.task_id,
                     start_stage_name=claimed_job.stage_name,
                     claimed_stage_running=True,
+                    execution_token=execution_token,
                 )
             finally:
                 if preflight_runtime_summary is not None:
