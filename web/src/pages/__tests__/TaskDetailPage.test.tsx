@@ -3,7 +3,14 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { downloadAsrModels, getTaskArtifacts, getTaskDetail, getTaskLogs, getTaskStages } from "../../lib/api";
-import type { ArtifactRecord, StageLogSummary, TaskDetail, TaskStageRecord } from "../../lib/types";
+import type {
+  ArtifactRecord,
+  AsrMissingModelRecovery,
+  StageLogSummary,
+  TaskDetail,
+  TaskExecutionProgress,
+  TaskStageRecord,
+} from "../../lib/types";
 import { getPollingInterval, TaskDetailPage } from "../TaskDetailPage";
 
 vi.mock("../../lib/api", async (importOriginal) => {
@@ -46,22 +53,13 @@ const artifacts: ArtifactRecord[] = [
   },
 ];
 
-interface AsrMissingModelRecovery {
-  stage: "asr";
-  kind: "missing_model";
-  message: string;
-  models: Array<{
-    key: "whisperx" | "alignment";
-    label: string;
-    status: "missing";
-    target_dir: string;
-    repo_id: string;
-    download_supported: boolean;
-  }>;
-}
-
 interface TaskDetailWithAsrMissingModelRecovery extends TaskDetail {
   failure_recovery: AsrMissingModelRecovery;
+}
+
+interface TaskDetailWithExecutionProgress extends Omit<TaskDetail, "status"> {
+  status: TaskDetail["status"] | "cancel_requested";
+  execution_progress: TaskExecutionProgress;
 }
 
 function renderPage() {
@@ -96,6 +94,15 @@ function mockTask(status: TaskDetail["status"]): TaskDetail {
 function mockTaskWithAsrMissingModelRecovery(): TaskDetailWithAsrMissingModelRecovery {
   return {
     ...mockTask("failed"),
+    stages: [
+      { name: "ingest", status: "success", summary: "Downloaded source video via bbdown", attempts: 1 },
+      { name: "media_prep", status: "success", summary: "Prepared ffprobe metadata and ASR wav", attempts: 1 },
+      { name: "asr", status: "failed", summary: "missing_model", attempts: 1 },
+      { name: "translation", status: "pending", summary: null, attempts: 0 },
+      { name: "highlight", status: "pending", summary: null, attempts: 0 },
+      { name: "export", status: "pending", summary: null, attempts: 0 },
+      { name: "report", status: "pending", summary: null, attempts: 0 },
+    ],
     failure_recovery: {
       stage: "asr",
       kind: "missing_model",
@@ -117,6 +124,80 @@ function mockTaskWithAsrMissingModelRecovery(): TaskDetailWithAsrMissingModelRec
           repo_id: "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
           download_supported: true,
         },
+      ],
+    },
+  };
+}
+
+function mockRunningAsrStages(): TaskStageRecord[] {
+  return [
+    { name: "ingest", status: "success", summary: "Downloaded source video via bbdown", attempts: 1 },
+    { name: "media_prep", status: "success", summary: "Prepared ffprobe metadata and ASR wav", attempts: 1 },
+    { name: "asr", status: "running", summary: null, attempts: 1 },
+    { name: "translation", status: "pending", summary: null, attempts: 0 },
+    { name: "highlight", status: "pending", summary: null, attempts: 0 },
+    { name: "export", status: "pending", summary: null, attempts: 0 },
+    { name: "report", status: "pending", summary: null, attempts: 0 },
+  ];
+}
+
+function mockTaskWithExecutionProgress(
+  status: TaskDetailWithExecutionProgress["status"] = "running",
+): TaskDetailWithExecutionProgress {
+  return {
+    task_id: "task-fixture123",
+    source_url: "https://www.bilibili.com/video/BV1fixture123",
+    normalized_source_url: "https://www.bilibili.com/video/BV1fixture123",
+    source_video_id: "BV1fixture123",
+    status,
+    stages: mockRunningAsrStages(),
+    execution_progress: {
+      stage_name: "asr",
+      current_phase: "transcribe",
+      phase_index: 3,
+      phase_count: 5,
+      phase_started_at: "2026-05-03T05:00:00+00:00",
+      heartbeat_at: "2026-05-03T05:01:00+00:00",
+      latest_message: "transcribe running",
+      phases: [
+        { name: "model_load", status: "success", elapsed_ms: 1234 },
+        { name: "vad", status: "success", elapsed_ms: 4567 },
+        { name: "transcribe", status: "running", elapsed_ms: 8901 },
+        { name: "align", status: "pending", elapsed_ms: null },
+        { name: "persist", status: "pending", elapsed_ms: null },
+      ],
+    },
+  };
+}
+
+function mockFailedTaskWithStaleExecutionProgress(): TaskDetail & {
+  execution_progress: TaskExecutionProgress;
+} {
+  return {
+    ...mockTask("failed"),
+    stages: [
+      { name: "ingest", status: "success", summary: "Downloaded source video via bbdown", attempts: 1 },
+      { name: "media_prep", status: "success", summary: "Prepared ffprobe metadata and ASR wav", attempts: 1 },
+      { name: "asr", status: "failed", summary: "malformed_progress_event", attempts: 1 },
+      { name: "translation", status: "pending", summary: null, attempts: 0 },
+      { name: "highlight", status: "pending", summary: null, attempts: 0 },
+      { name: "export", status: "pending", summary: null, attempts: 0 },
+      { name: "report", status: "pending", summary: null, attempts: 0 },
+    ],
+    execution_progress: {
+      stage_name: "asr",
+      current_phase: "transcribe",
+      phase_index: 3,
+      phase_count: 5,
+      phase_started_at: "2026-05-03T05:00:00+00:00",
+      heartbeat_at: "2026-05-03T05:01:00+00:00",
+      latest_message: "stale progress should not render",
+      phases: [
+        { name: "model_load", status: "success", elapsed_ms: 1234 },
+        { name: "vad", status: "success", elapsed_ms: 4567 },
+        { name: "transcribe", status: "running", elapsed_ms: 8901 },
+        { name: "align", status: "pending", elapsed_ms: null },
+        { name: "persist", status: "pending", elapsed_ms: null },
       ],
     },
   };
@@ -186,14 +267,88 @@ describe("TaskDetailPage", () => {
     });
   });
 
+  it("renders an ASR execution progress section with current phase, timings, heartbeat, and latest message", async () => {
+    vi.mocked(getTaskDetail).mockResolvedValue(mockTaskWithExecutionProgress("running"));
+    vi.mocked(getTaskStages).mockResolvedValue(mockRunningAsrStages());
+    vi.mocked(getTaskLogs).mockResolvedValue([]);
+
+    renderPage();
+
+    const progressPanel = (await screen.findByRole("heading", { name: "ASR 执行进度" })).closest(".panel");
+    expect(progressPanel).not.toBeNull();
+    expect(within(progressPanel as HTMLElement).getByText("语音转写（3 / 5）")).toBeInTheDocument();
+    expect(within(progressPanel as HTMLElement).getByText("最近消息")).toBeInTheDocument();
+    expect(within(progressPanel as HTMLElement).getByText("transcribe running")).toBeInTheDocument();
+    expect(within(progressPanel as HTMLElement).getByText("最近心跳")).toBeInTheDocument();
+    expect(within(progressPanel as HTMLElement).getByText("2026-05-03 05:01:00 UTC")).toBeInTheDocument();
+    expect(within(progressPanel as HTMLElement).getByText("8.9s")).toBeInTheDocument();
+    expect(within(progressPanel as HTMLElement).getByText("1.2s")).toBeInTheDocument();
+  });
+
+  it("shows explicit cancel-requested waiting copy for active ASR instead of an idle summary", async () => {
+    vi.mocked(getTaskDetail).mockResolvedValue(mockTaskWithExecutionProgress("cancel_requested"));
+    vi.mocked(getTaskStages).mockResolvedValue(mockRunningAsrStages());
+    vi.mocked(getTaskLogs).mockResolvedValue([]);
+
+    renderPage();
+
+    await screen.findByRole("heading", { name: "ASR 执行进度" });
+    const timelinePanel = screen.getByRole("heading", { name: "阶段时间线" }).closest(".panel");
+    expect(timelinePanel).not.toBeNull();
+    const asrCard = within(timelinePanel as HTMLElement)
+      .getByRole("heading", { level: 4, name: "语音转写" })
+      .closest(".stage-card");
+    expect(asrCard).not.toBeNull();
+    expect(within(asrCard as HTMLElement).getByText("已请求取消，正在等待当前 ASR 执行停止。"))
+      .toBeInTheDocument();
+    expect(within(asrCard as HTMLElement).queryByText("等待该阶段开始。"))
+      .not.toBeInTheDocument();
+  });
+
+  it("does not render active ASR progress for a terminal task even if stale execution_progress is still present", async () => {
+    const failedTask = mockFailedTaskWithStaleExecutionProgress();
+    const failedLogs: StageLogSummary[] = failedTask.stages.map((stage) => ({
+      stage_name: stage.name,
+      status: stage.status,
+      summary: stage.summary,
+      log_path: `/data/tasks/task-fixture123/logs/${stage.name}.log`,
+    }));
+
+    vi.mocked(getTaskDetail).mockResolvedValue(failedTask);
+    vi.mocked(getTaskStages).mockResolvedValue(failedTask.stages);
+    vi.mocked(getTaskLogs).mockResolvedValue(failedLogs);
+
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "任务 task-fixture123" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "ASR 执行进度" })).not.toBeInTheDocument();
+    expect(screen.queryByText("stale progress should not render")).not.toBeInTheDocument();
+
+    const failurePanel = screen.getByText("可读失败摘要").closest(".panel");
+    expect(failurePanel).not.toBeNull();
+    expect(within(failurePanel as HTMLElement).getByRole("heading", { name: "语音转写阶段失败" }))
+      .toBeInTheDocument();
+  });
+
   it("uses a 3-second polling cadence for non-terminal task states", () => {
     expect(getPollingInterval("pending")).toBe(3_000);
     expect(getPollingInterval("running")).toBe(3_000);
   });
 
+  it("renders cancelled as a terminal task status with the slower polling cadence", async () => {
+    vi.mocked(getTaskDetail).mockResolvedValue(mockTask("cancelled"));
+
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "任务 task-fixture123" })).toBeInTheDocument();
+    expect(screen.getByText("已取消")).toBeInTheDocument();
+    expect(getPollingInterval("cancelled")).toBe(15_000);
+  });
+
   it("uses a 15-second polling cadence after terminal task states", () => {
     expect(getPollingInterval("success")).toBe(15_000);
     expect(getPollingInterval("failed")).toBe(15_000);
+    expect(getPollingInterval("cancelled")).toBe(15_000);
     expect(getPollingInterval("skipped")).toBe(15_000);
   });
 });

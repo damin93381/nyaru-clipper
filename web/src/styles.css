@@ -329,6 +329,7 @@ input {
 
 .status-badge--pending,
 .status-badge--running,
+.status-badge--cancel_requested,
 .status-badge--success,
 .status-badge--failed,
 .status-badge--skipped {
@@ -341,6 +342,10 @@ input {
 }
 
 .status-badge--running {
+  color: var(--accent-warning);
+}
+
+.status-badge--cancel_requested {
   color: var(--accent-warning);
 }
 

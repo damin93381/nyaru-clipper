@@ -13,14 +13,17 @@ import { GLOSSARY_TERMS } from "../lib/copy/glossary";
 import { TASK_DETAIL_COPY } from "../lib/copy/taskDetail";
 import {
 	type ArtifactRecord,
+	type AsrExecutionPhaseName,
+	type AsrMissingModelRecovery,
 	CANONICAL_STAGES,
+	type ExecutionProgressPhase,
 	formatStageLabel,
 	formatTaskStatusLabel,
 	humanizeSummary,
 	isTerminalStatus,
-	type AsrMissingModelRecovery,
 	type StageLogSummary,
 	safeParseMetadata,
+	type TaskExecutionProgress,
 	type TaskStageRecord,
 	type TaskStatus,
 } from "../lib/types";
@@ -41,12 +44,106 @@ export function getPollingInterval(
 }
 
 function getStatusTone(status: TaskStatus): string {
+	if (status === "cancel_requested") {
+		return "status-badge status-badge--warning";
+	}
+
 	return `status-badge status-badge--${status}`;
+}
+
+function formatUtcTimestamp(timestamp: string | null | undefined): string {
+	if (!timestamp) {
+		return TASK_DETAIL_COPY.progress.heartbeatFallback;
+	}
+
+	const value = new Date(timestamp);
+	if (Number.isNaN(value.getTime())) {
+		return timestamp;
+	}
+
+	const year = value.getUTCFullYear();
+	const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+	const day = String(value.getUTCDate()).padStart(2, "0");
+	const hours = String(value.getUTCHours()).padStart(2, "0");
+	const minutes = String(value.getUTCMinutes()).padStart(2, "0");
+	const seconds = String(value.getUTCSeconds()).padStart(2, "0");
+
+	return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+}
+
+function formatElapsedMs(elapsedMs: number | null | undefined): string | null {
+	if (
+		elapsedMs === null ||
+		elapsedMs === undefined ||
+		Number.isNaN(elapsedMs)
+	) {
+		return null;
+	}
+
+	return `${(elapsedMs / 1000).toFixed(1)}s`;
+}
+
+function formatAsrPhaseLabel(phase: AsrExecutionPhaseName): string {
+	return TASK_DETAIL_COPY.progress.phaseLabels[phase] ?? phase;
+}
+
+function getProgressPhaseTone(
+	status: ExecutionProgressPhase["status"],
+): string {
+	if (status === "failed") {
+		return "status-badge status-badge--failed";
+	}
+
+	if (status === "success") {
+		return "status-badge status-badge--success";
+	}
+
+	if (status === "running") {
+		return "status-badge status-badge--running";
+	}
+
+	return "status-badge status-badge--pending";
+}
+
+function buildAsrStageSummary(
+	taskStatus: TaskStatus,
+	executionProgress: TaskExecutionProgress | undefined,
+): string | null {
+	if (taskStatus === "cancel_requested") {
+		return TASK_DETAIL_COPY.progress.cancelRequestedSummary;
+	}
+
+	if (executionProgress?.latest_message) {
+		return executionProgress.latest_message;
+	}
+
+	if (executionProgress) {
+		return `${formatAsrPhaseLabel(executionProgress.current_phase)}进行中`;
+	}
+
+	return null;
+}
+
+function isAsrStageActive(
+	stages: TaskStageRecord[],
+	taskStatus: TaskStatus | null | undefined,
+): boolean {
+	const asrStage = stages.find((stage) => stage.name === "asr");
+
+	return Boolean(
+		asrStage &&
+			asrStage.status === "running" &&
+			(taskStatus === "running" || taskStatus === "cancel_requested"),
+	);
 }
 
 function buildStageRows(
 	stages: TaskStageRecord[],
 	logs: StageLogSummary[],
+	options: {
+		taskStatus: TaskStatus;
+		executionProgress?: TaskExecutionProgress;
+	},
 ): StageRow[] {
 	const stagesByName = new Map(stages.map((stage) => [stage.name, stage]));
 	const logsByStage = new Map(logs.map((log) => [log.stage_name, log]));
@@ -54,11 +151,22 @@ function buildStageRows(
 	return CANONICAL_STAGES.map((stageName) => {
 		const stage = stagesByName.get(stageName);
 		const log = logsByStage.get(stageName);
-		const rawSummary = log?.summary ?? stage?.summary ?? null;
+		const progressSummary =
+			stageName === "asr" && stage?.status === "running"
+				? buildAsrStageSummary(options.taskStatus, options.executionProgress)
+				: null;
+		const rawSummary =
+			progressSummary ?? log?.summary ?? stage?.summary ?? null;
+		const status =
+			stageName === "asr" &&
+			stage?.status === "running" &&
+			options.taskStatus === "cancel_requested"
+				? "cancel_requested"
+				: (stage?.status ?? log?.status ?? "pending");
 
 		return {
 			name: stageName,
-			status: stage?.status ?? log?.status ?? "pending",
+			status,
 			attempts: stage?.attempts ?? 0,
 			summary: humanizeSummary(rawSummary),
 			logPath: log?.log_path ?? null,
@@ -124,6 +232,102 @@ function ArtifactCard({ artifact }: { artifact: ArtifactRecord }) {
 	);
 }
 
+function AsrExecutionProgressPanel({
+	executionProgress,
+	taskStatus,
+}: {
+	executionProgress: TaskExecutionProgress;
+	taskStatus: TaskStatus;
+}) {
+	const currentPhaseLabel = `${formatAsrPhaseLabel(executionProgress.current_phase)}（${executionProgress.phase_index} / ${executionProgress.phase_count}）`;
+	const latestMessage =
+		executionProgress.latest_message ??
+		TASK_DETAIL_COPY.progress.latestMessageFallback;
+	const phaseStartedAt = executionProgress.phase_started_at
+		? formatUtcTimestamp(executionProgress.phase_started_at)
+		: TASK_DETAIL_COPY.progress.phaseStartedAtFallback;
+
+	return (
+		<section className="panel">
+			<div className="panel__header">
+				<div>
+					<p className="eyebrow">{TASK_DETAIL_COPY.progress.eyebrow}</p>
+					<h3>{TASK_DETAIL_COPY.progress.title}</h3>
+				</div>
+				{taskStatus === "cancel_requested" ? (
+					<span className="status-badge status-badge--warning">
+						{TASK_DETAIL_COPY.progress.cancelRequestedTitle}
+					</span>
+				) : null}
+			</div>
+
+			<div className="summary-strip">
+				<div>
+					<span className="summary-strip__label">
+						{TASK_DETAIL_COPY.progress.currentPhaseLabel}
+					</span>
+					<strong>{currentPhaseLabel}</strong>
+				</div>
+				{taskStatus === "cancel_requested" ? (
+					<div>
+						<span className="summary-strip__label">
+							{TASK_DETAIL_COPY.progress.cancelRequestedTitle}
+						</span>
+						<strong>{TASK_DETAIL_COPY.progress.cancelRequestedSummary}</strong>
+					</div>
+				) : null}
+			</div>
+
+			<dl className="metadata-list">
+				<div className="metadata-list__row">
+					<dt>{TASK_DETAIL_COPY.progress.latestMessageLabel}</dt>
+					<dd>{latestMessage}</dd>
+				</div>
+				<div className="metadata-list__row">
+					<dt>{TASK_DETAIL_COPY.progress.heartbeatLabel}</dt>
+					<dd>{formatUtcTimestamp(executionProgress.heartbeat_at)}</dd>
+				</div>
+				<div className="metadata-list__row">
+					<dt>{TASK_DETAIL_COPY.progress.phaseStartedAtLabel}</dt>
+					<dd>{phaseStartedAt}</dd>
+				</div>
+			</dl>
+
+			<ol className="stage-list">
+				{executionProgress.phases.map((phase) => {
+					const elapsed = formatElapsedMs(phase.elapsed_ms);
+					const helperText =
+						elapsed ??
+						(phase.status === "running"
+							? TASK_DETAIL_COPY.progress.phaseActive
+							: TASK_DETAIL_COPY.progress.phasePending);
+
+					return (
+						<li className="stage-card" key={phase.name}>
+							<div className="stage-card__header">
+								<div>
+									<p className="stage-card__eyebrow">
+										{TASK_DETAIL_COPY.progress.currentPhaseLabel}
+									</p>
+									<h4>{formatAsrPhaseLabel(phase.name)}</h4>
+								</div>
+								<span className={getProgressPhaseTone(phase.status)}>
+									{formatTaskStatusLabel(phase.status)}
+								</span>
+							</div>
+							<p>
+								{elapsed
+									? TASK_DETAIL_COPY.progress.phaseElapsed(elapsed)
+									: helperText}
+							</p>
+						</li>
+					);
+				})}
+			</ol>
+		</section>
+	);
+}
+
 export function TaskDetailPage() {
 	const params = useParams();
 	const taskId = params.taskId ?? "";
@@ -137,6 +341,7 @@ export function TaskDetailPage() {
 	});
 
 	const taskStatus = taskDetailQuery.data?.status;
+	const executionProgress = taskDetailQuery.data?.execution_progress;
 
 	const stageQuery = useQuery({
 		queryKey: ["task", taskId, "stages"],
@@ -159,24 +364,31 @@ export function TaskDetailPage() {
 		refetchInterval: () => getPollingInterval(taskStatus),
 	});
 
-	const stages = stageQuery.data ?? taskDetailQuery.data?.stages ?? [];
+	const stages = taskDetailQuery.data?.stages ?? stageQuery.data ?? [];
 	const logs = logsQuery.data ?? [];
 	const artifacts = artifactsQuery.data ?? [];
 
-	const stageRows = useMemo(() => buildStageRows(stages, logs), [logs, stages]);
+	const stageRows = useMemo(
+		() =>
+			buildStageRows(stages, logs, {
+				taskStatus: taskStatus ?? "pending",
+				executionProgress,
+			}),
+		[executionProgress, logs, stages, taskStatus],
+	);
+	const isActiveAsr = isAsrStageActive(stages, taskStatus);
 	const failedStage =
 		stageRows.find((stage) => stage.status === "failed") ?? null;
 	const failureRecovery = taskDetailQuery.data?.failure_recovery;
 	const asrMissingModelRecovery: AsrMissingModelRecovery | null =
+		failedStage?.name === "asr" &&
 		failureRecovery?.stage === "asr" &&
 		failureRecovery.kind === "missing_model"
 			? failureRecovery
 			: null;
 	const downloadableModelKeys =
 		asrMissingModelRecovery?.models
-			.filter(
-				(model) => model.download_supported && model.status === "missing",
-			)
+			.filter((model) => model.download_supported && model.status === "missing")
 			.map((model) => model.key) ?? [];
 
 	const downloadAsrModelsMutation = useMutation({
@@ -300,6 +512,13 @@ export function TaskDetailPage() {
 						</>
 					) : null}
 				</div>
+			) : null}
+
+			{isActiveAsr && executionProgress?.stage_name === "asr" ? (
+				<AsrExecutionProgressPanel
+					executionProgress={executionProgress}
+					taskStatus={taskDetailQuery.data.status}
+				/>
 			) : null}
 
 			<div className="detail-grid">
