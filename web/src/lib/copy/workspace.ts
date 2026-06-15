@@ -57,6 +57,22 @@ export const WORKSPACE_COPY = {
     title: "产物下载",
     empty: "字幕、报告和片段产物持久化后，会在这里显示下载操作。",
   },
+  readiness: {
+    labels: {
+      ready: "已就绪",
+      not_ready: "尚未生成",
+      missing: "产物缺失",
+      failed: "生成失败",
+      load_error: "加载失败",
+    },
+    descriptions: {
+      ready: "该数据已可用于工作区。",
+      not_ready: "该数据尚未生成，请等待对应阶段完成。",
+      missing: "产物缺失，可重试生成阶段。",
+      failed: "生成阶段失败，请查看恢复操作。",
+      load_error: "加载工作台数据失败，请重新加载此区域。",
+    },
+  },
   exportedClips: {
     eyebrow: GLOSSARY_TERMS.exportedClips,
     title: "可下载的 MP4 产物",

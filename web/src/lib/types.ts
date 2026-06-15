@@ -26,6 +26,58 @@ export type TaskStatus =
 	| "cancelled"
 	| "skipped";
 
+export type TaskFailureCode =
+	| "unknown_failure"
+	| "asr_missing_model"
+	| "asr_oom"
+	| "asr_alignment_failed"
+	| "asr_child_failed"
+	| "malformed_progress_event"
+	| "stale_job_recovered"
+	| "cancelled";
+
+export type RecoveryActionId =
+	| "retry_stage"
+	| "download_asr_model"
+	| "view_logs"
+	| string;
+
+export interface TaskRecoveryAction {
+	id: RecoveryActionId;
+	enabled: boolean;
+	method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | string;
+	label?: string;
+	label_key?: string;
+	description_key?: string;
+	disabled_reason?: string | null;
+	endpoint?: string;
+	href?: string;
+	payload?: Record<string, unknown> | null;
+	confirmation_required?: boolean;
+	success_behavior?: string;
+}
+
+export type ArtifactReadinessStatus =
+	| "ready"
+	| "not_ready"
+	| "missing"
+	| "failed";
+
+export interface ArtifactReadinessRecord {
+	kind: string;
+	stage_name: TaskStageName | string;
+	status: ArtifactReadinessStatus;
+	readiness?: ArtifactReadinessStatus;
+	artifact_id?: number | null;
+	path?: string | null;
+}
+
+export interface TaskExecutionControlState {
+	cancel_requested?: boolean;
+	force_kill_requested?: boolean;
+	active_process_group_id?: number | null;
+}
+
 export const ASR_EXECUTION_PHASES = [
 	"model_load",
 	"vad",
@@ -63,6 +115,8 @@ export interface TaskStageRecord {
 	name: TaskStageName;
 	status: TaskStatus;
 	summary: string | null;
+	failure_code?: TaskFailureCode | null;
+	recovery_actions?: TaskRecoveryAction[];
 	attempts: number;
 }
 
@@ -72,6 +126,11 @@ export interface TaskDetail {
 	normalized_source_url: string;
 	source_video_id: string | null;
 	status: TaskStatus;
+	failure_code?: TaskFailureCode | null;
+	recovery_actions?: TaskRecoveryAction[];
+	artifact_readiness?: ArtifactReadinessRecord[];
+	log_records?: StageLogSummary[];
+	execution_control?: TaskExecutionControlState;
 	stages: TaskStageRecord[];
 	execution_progress?: TaskExecutionProgress;
 	failure_recovery?: AsrMissingModelRecovery;
@@ -124,6 +183,8 @@ export interface StageLogSummary {
 	stage_name: string;
 	status: TaskStatus;
 	summary: string | null;
+	display_label?: string;
+	safe_summary?: string | null;
 	log_path: string;
 }
 

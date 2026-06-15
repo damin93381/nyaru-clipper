@@ -1,14 +1,15 @@
 import type {
-  DownloadAsrModelsPayload,
-  DownloadAsrModelsResponse,
   ArtifactRecord,
   AsrMissingModelKey,
   ClipExportPayload,
   ClipExportResponse,
   CreateTaskPayload,
+  DownloadAsrModelsPayload,
+  DownloadAsrModelsResponse,
   RuntimeCapabilities,
   StageLogSummary,
   TaskDetail,
+  TaskStageName,
   TaskStageRecord,
 } from "./types";
 
@@ -77,6 +78,22 @@ export function getTaskDetail(taskId: string): Promise<TaskDetail> {
 
 export function getTaskStages(taskId: string): Promise<TaskStageRecord[]> {
   return request<TaskStageRecord[]>(`/tasks/${taskId}/stages`);
+}
+
+export interface RetryTaskResponse {
+  task_id: string;
+  retry_stage: TaskStageName;
+  status: "pending";
+}
+
+export function retryTaskFromStage(
+  taskId: string,
+  stageName: TaskStageName,
+): Promise<RetryTaskResponse> {
+  return request<RetryTaskResponse>(`/tasks/${taskId}/retry`, {
+    method: "POST",
+    body: JSON.stringify({ stage_name: stageName }),
+  });
 }
 
 export function getTaskArtifacts(taskId: string): Promise<ArtifactRecord[]> {

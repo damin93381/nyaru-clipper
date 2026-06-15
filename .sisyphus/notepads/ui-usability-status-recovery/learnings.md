@@ -14,3 +14,11 @@
 - Task detail now includes `failure_code`, `recovery_actions`, and `artifact_readiness`; readiness currently uses public artifact kinds and aliases internal persisted kinds such as `asr_audio` and `bilingual_transcript_json`.
 - Log summaries now include `display_label` and `safe_summary`, with token/path/env-style redaction while preserving the existing `summary` and pseudo `/data/tasks/...` log path contract.
 - Verification: `uv run --project backend pytest backend/tests/test_tasks_api.py backend/tests/test_retry_api.py backend/tests/test_retry_resume.py backend/tests/test_schema_migration.py -q` passed: 22 passed, 1 warning.
+
+## 2026-06-16 - T3 frontend status recovery contracts
+
+- Frontend contract mirrors now model task/stage `failure_code`, recovery actions, artifact readiness, safe log summaries, and optional execution control state in `web/src/lib/types.ts`.
+- Backend tests in this branch currently serialize recovery actions with `label`/`href`/`payload`; frontend types also accept `label_key`/`description_key`/`endpoint`/`confirmation_required`/`success_behavior` for the planned copy-key contract.
+- `web/src/lib/taskState.ts` centralizes state-matrix classification without parsing human summaries; retryability is based on enabled `retry_stage` recovery actions and their stage payload when present.
+- Vitest path filtering runs from the `web/` package cwd; `pnpm --dir web test --run ../web/src/lib/__tests__/api.test.ts ../web/src/lib/__tests__/taskState.test.ts` is the bounded equivalent of the plan's root-relative targeted test command.
+- Verification: targeted lib tests passed (28 tests) and `pnpm --dir web build` passed.
