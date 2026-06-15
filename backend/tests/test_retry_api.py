@@ -151,3 +151,77 @@ def test_retry_endpoint_from_asr_clears_stale_execution_progress(tmp_path, monke
             remaining = session.exec(select(progress_model).where(progress_model.task_id == task_id)).all()
 
         assert remaining == []
+
+
+def test_retry_endpoint_after_asr_preserves_asr_progress_and_successful_upstream(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    db_path = tmp_path / "task-state.sqlite3"
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("APP_DATABASE_URL", f"sqlite:///{db_path}")
+    _reset_runtime_state()
+
+    import app.models as app_models
+    from app.db import session_scope
+    from app.main import app
+    from app.models import Task, TaskJob, TaskStage
+
+    progress_model = getattr(app_models, "TaskExecutionProgress", None)
+    assert progress_model is not None
+
+    with TestClient(app) as client:
+        task_id = _create_task(client)
+
+        with session_scope() as session:
+            task = session.get(Task, task_id)
+            assert task is not None
+            task.status = "failed"
+            session.add(task)
+
+            stages = session.exec(select(TaskStage).where(TaskStage.task_id == task_id)).all()
+            for stage in stages:
+                if stage.name in {"ingest", "media_prep", "asr"}:
+                    stage.status = "success"
+                    stage.summary = None
+                elif stage.name == "translation":
+                    stage.status = "failed"
+                    stage.summary = "translation_failed"
+                else:
+                    stage.status = "skipped"
+                session.add(stage)
+
+            job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+            job.status = "failed"
+            job.stage_name = "translation"
+            session.add(job)
+            session.add(
+                progress_model(
+                    task_id=task_id,
+                    stage_name="asr",
+                    current_phase="persist",
+                    phase_index=5,
+                    phase_count=5,
+                    latest_message="asr complete",
+                    phase_timings_json='[{"name": "persist", "status": "success", "elapsed_ms": 42}]',
+                )
+            )
+
+        retry_response = client.post(f"/api/tasks/{task_id}/retry", json={"stage_name": "translation"})
+
+        assert retry_response.status_code == 202
+
+        with session_scope() as session:
+            stages = {
+                stage.name: stage.status
+                for stage in session.exec(select(TaskStage).where(TaskStage.task_id == task_id)).all()
+            }
+            progress = session.get(progress_model, task_id)
+            assert progress is not None
+            progress_stage_name = progress.stage_name
+            progress_latest_message = progress.latest_message
+
+        assert stages["ingest"] == "success"
+        assert stages["media_prep"] == "success"
+        assert stages["asr"] == "success"
+        assert stages["translation"] == "pending"
+        assert progress_stage_name == "asr"
+        assert progress_latest_message == "asr complete"

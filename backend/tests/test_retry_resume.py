@@ -104,11 +104,16 @@ def test_resume_from_translation_failure_reruns_only_failed_stage_and_downstream
         job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
         stage_statuses = {name: stage.status for name, stage in stages.items()}
         stage_attempts = {name: stage.attempts for name, stage in stages.items()}
+        upstream_summaries = {name: stages[name].summary for name in ["ingest", "media_prep", "asr"]}
         job_status = job.status
 
     assert stage_statuses["ingest"] == "success"
     assert stage_statuses["media_prep"] == "success"
     assert stage_statuses["asr"] == "success"
+    assert stage_attempts["ingest"] == 1
+    assert stage_attempts["media_prep"] == 1
+    assert stage_attempts["asr"] == 1
+    assert upstream_summaries == {"ingest": None, "media_prep": None, "asr": None}
     assert stage_attempts["translation"] == 2
     assert stage_attempts["highlight"] == 1
     assert stage_attempts["export"] == 1

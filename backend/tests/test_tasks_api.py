@@ -253,6 +253,149 @@ def test_task_detail_failure_recovery_reports_asr_missing_model(client: TestClie
     assert [model["key"] for model in body["failure_recovery"]["models"]] == ["whisperx", "alignment"]
 
 
+def test_task_detail_exposes_failure_code_and_recovery_actions(
+    client: TestClient, backend_env: dict[str, Path | str]
+) -> None:
+    from app.db import session_scope
+    from app.models import Artifact, Task, TaskStage
+
+    def create_failed_task(source_id: str, failed_stage_name: str, *, summary: str | None = None) -> str:
+        response = client.post(
+            "/api/tasks",
+            json={"source_url": f"https://www.bilibili.com/video/{source_id}"},
+        )
+        assert response.status_code == 201
+        task_id = response.json()["task_id"]
+        with session_scope() as session:
+            task = session.get(Task, task_id)
+            assert task is not None
+            task.status = "failed"
+            session.add(task)
+
+            stages = session.exec(select(TaskStage).where(TaskStage.task_id == task_id)).all()
+            failed_index = CANONICAL_STAGES.index(failed_stage_name)
+            for stage in stages:
+                stage_index = CANONICAL_STAGES.index(stage.name)
+                if stage_index < failed_index:
+                    stage.status = "success"
+                elif stage.name == failed_stage_name:
+                    stage.status = "failed"
+                    stage.summary = summary or f"{failed_stage_name}_failed"
+                else:
+                    stage.status = "skipped"
+                session.add(stage)
+        return task_id
+
+    generic_task_id = create_failed_task("BV1genericfail001", "translation", summary="provider_timeout")
+    ready_video = Path(backend_env["data_dir"]) / "tasks" / generic_task_id / "raw" / "source.mp4"
+    ready_video.parent.mkdir(parents=True, exist_ok=True)
+    ready_video.write_text("fake video", encoding="utf-8")
+    (Path(backend_env["data_dir"]) / "tasks" / generic_task_id / "logs" / "translation.log").write_text(
+        "provider timed out with token abc123\n", encoding="utf-8"
+    )
+    with session_scope() as session:
+        artifact = Artifact(
+            task_id=generic_task_id,
+            stage_name="ingest",
+            kind="source_video",
+            path=str(ready_video),
+            metadata_json='{"duration_seconds": 12}',
+        )
+        session.add(artifact)
+        session.flush()
+        ready_artifact_id = int(artifact.id)
+
+    generic_response = client.get(f"/api/tasks/{generic_task_id}")
+    assert generic_response.status_code == 200
+    generic_body = generic_response.json()
+    assert generic_body["failure_code"] == "unknown_failure"
+    assert generic_body["recovery_actions"] == [
+        {
+            "id": "retry_stage",
+            "label": "Retry translation",
+            "method": "POST",
+            "href": f"/api/tasks/{generic_task_id}/retry",
+            "payload": {"stage_name": "translation"},
+            "enabled": True,
+        }
+    ]
+    assert generic_body["artifact_readiness"] == [
+        {
+            "stage_name": "ingest",
+            "kind": "source_video",
+            "status": "ready",
+            "artifact_id": ready_artifact_id,
+            "path": f"/api/tasks/{generic_task_id}/artifacts/{ready_artifact_id}/content/source.mp4",
+        },
+        {
+            "stage_name": "media_prep",
+            "kind": "prepared_audio",
+            "status": "not_ready",
+            "artifact_id": None,
+            "path": None,
+        },
+        {
+            "stage_name": "asr",
+            "kind": "transcript_json",
+            "status": "missing",
+            "artifact_id": None,
+            "path": None,
+        },
+        {
+            "stage_name": "translation",
+            "kind": "translated_segments",
+            "status": "failed",
+            "artifact_id": None,
+            "path": None,
+        },
+    ]
+
+    logs_response = client.get(f"/api/tasks/{generic_task_id}/logs")
+    assert logs_response.status_code == 200
+    translation_log = next(entry for entry in logs_response.json() if entry["stage_name"] == "translation")
+    assert translation_log == {
+        "stage_name": "translation",
+        "status": "failed",
+        "summary": "provider timed out with token abc123",
+        "display_label": "Translation",
+        "safe_summary": "provider timed out with token [redacted]",
+        "log_path": f"/data/tasks/{generic_task_id}/logs/translation.log",
+    }
+
+    asr_task_id = create_failed_task("BV1asrmissing001", "asr", summary="missing_model")
+    asr_response = client.get(f"/api/tasks/{asr_task_id}")
+    assert asr_response.status_code == 200
+    asr_body = asr_response.json()
+    assert asr_body["failure_code"] == "asr_missing_model"
+    assert asr_body["failure_recovery"]["kind"] == "missing_model"
+    assert [action["id"] for action in asr_body["recovery_actions"]] == ["download_asr_model", "retry_stage"]
+    assert asr_body["recovery_actions"][0] == {
+        "id": "download_asr_model",
+        "label": "Download missing ASR models",
+        "method": "POST",
+        "href": f"/api/tasks/{asr_task_id}/asr/models/download",
+        "payload": {"model_keys": ["whisperx", "alignment"]},
+        "enabled": True,
+    }
+
+    cancelled_response = client.post(
+        "/api/tasks",
+        json={"source_url": "https://www.bilibili.com/video/BV1cancelled001"},
+    )
+    assert cancelled_response.status_code == 201
+    cancelled_task_id = cancelled_response.json()["task_id"]
+    with session_scope() as session:
+        task = session.get(Task, cancelled_task_id)
+        assert task is not None
+        task.status = "cancelled"
+        session.add(task)
+
+    cancelled_detail = client.get(f"/api/tasks/{cancelled_task_id}")
+    assert cancelled_detail.status_code == 200
+    assert cancelled_detail.json()["failure_code"] is None
+    assert [action for action in cancelled_detail.json()["recovery_actions"] if action["enabled"]] == []
+
+
 def test_task_detail_omits_execution_progress_when_no_tracked_row_exists(client: TestClient) -> None:
     response = client.post(
         "/api/tasks",
