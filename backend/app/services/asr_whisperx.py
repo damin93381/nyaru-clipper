@@ -4,6 +4,7 @@ import importlib
 import json
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol, TypeVar
@@ -12,6 +13,8 @@ from sqlmodel import Session
 
 from app.paths import get_data_dir
 from app.repositories.tasks import get_task_record
+from app.services.runtime_profile import detect_runtime_profile
+from app.services.failure_codes import normalize_failure_code
 from app.services.pipeline_support import append_stage_log, set_stage_status
 from app.services.storage import (
     ensure_task_dirs,
@@ -43,6 +46,13 @@ class AsrPhaseResult:
     name: str
     status: str
     elapsed_ms: int | None = None
+
+
+@dataclass(slots=True)
+class AsrExecutionConfig:
+    device: str
+    compute_type: str
+    fallback_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -128,11 +138,85 @@ def _load_whisperx_module():
     return importlib.import_module("whisperx")
 
 
+def _load_ctranslate2_module():
+    return importlib.import_module("ctranslate2")
+
+
 def _default_model_root(settings: Settings) -> Path:
     cache_dir = settings.whisperx_model_cache_dir
     if cache_dir is not None:
         return cache_dir
     return get_data_dir() / "models" / "whisperx"
+
+
+def _is_rocm_runtime_profile(runtime_profile: Mapping[str, object] | object) -> bool:
+    if not isinstance(runtime_profile, Mapping):
+        return False
+    accelerator = runtime_profile.get("accelerator")
+    if not isinstance(accelerator, Mapping):
+        return False
+    return accelerator.get("torch_build_family") == "rocm"
+
+
+def _is_ctranslate2_cuda_backend_unavailable(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "cuda driver version is insufficient for cuda runtime version" in message
+
+
+def _select_cpu_compute_type(
+    requested_compute_type: str,
+    supported_compute_types: set[str],
+) -> str:
+    if requested_compute_type in supported_compute_types:
+        return requested_compute_type
+    for candidate in ("float32", "int8_float32", "int8", "int16"):
+        if candidate in supported_compute_types:
+            return candidate
+    if not supported_compute_types:
+        raise AsrFailure(
+            code="unsupported_runtime",
+            message="WhisperX CPU fallback is unavailable because CTranslate2 reported no supported CPU compute types.",
+        )
+    return sorted(supported_compute_types)[0]
+
+
+def _resolve_asr_execution_config(settings: Settings) -> AsrExecutionConfig:
+    requested_device = settings.whisperx_device
+    requested_compute_type = settings.whisperx_compute_type
+
+    execution_config = AsrExecutionConfig(
+        device=requested_device,
+        compute_type=requested_compute_type,
+    )
+    if requested_device != "cuda":
+        return execution_config
+
+    runtime_profile = detect_runtime_profile()
+    if not _is_rocm_runtime_profile(runtime_profile):
+        return execution_config
+
+    ctranslate2 = _load_ctranslate2_module()
+    try:
+        ctranslate2.get_supported_compute_types("cuda")
+        return execution_config
+    except Exception as exc:
+        if not _is_ctranslate2_cuda_backend_unavailable(exc):
+            raise
+
+    cpu_compute_types = {
+        str(compute_type)
+        for compute_type in ctranslate2.get_supported_compute_types("cpu")
+    }
+    resolved_compute_type = _select_cpu_compute_type(requested_compute_type, cpu_compute_types)
+    fallback_reason = (
+        "ROCm torch is available, but the installed WhisperX/CTranslate2 backend cannot execute with device='cuda' on this host. "
+        f"Falling back to CPU with compute_type='{resolved_compute_type}'."
+    )
+    return AsrExecutionConfig(
+        device="cpu",
+        compute_type=resolved_compute_type,
+        fallback_reason=fallback_reason,
+    )
 
 
 def _model_target_dir(*, root: Path, key: str) -> Path:
@@ -300,7 +384,14 @@ def transcribe_task_audio(session: Session, task_id: str) -> AsrStageResult:
     except AsrFailure as failure:
         append_stage_log(log_path, f"classified_failure={failure.code}")
         append_stage_log(log_path, str(failure))
-        set_stage_status(session, task_id=task_id, stage_name="asr", status="failed", summary=failure.code)
+        set_stage_status(
+            session,
+            task_id=task_id,
+            stage_name="asr",
+            status="failed",
+            summary=failure.code,
+            failure_code=normalize_failure_code("asr", failure.code),
+        )
         session.commit()
         raise
 
@@ -430,7 +521,8 @@ def execute_asr_pipeline(
 
     try:
         _ensure_input_audio_path(audio_path)
-        model_metadata = _build_model_metadata(settings)
+        execution_config = _resolve_asr_execution_config(settings)
+        model_metadata = _build_model_metadata(settings, execution_config=execution_config)
         whisperx = _load_whisperx_module()
         model = _run_pipeline_phase(
             phase="model_load",
@@ -438,8 +530,8 @@ def execute_asr_pipeline(
             observer=observer,
             action=lambda: whisperx.load_model(
                 _resolve_main_model_ref(settings),
-                settings.whisperx_device,
-                compute_type=settings.whisperx_compute_type,
+                execution_config.device,
+                compute_type=execution_config.compute_type,
                 download_root=str(settings.whisperx_model_cache_dir) if settings.whisperx_model_cache_dir else None,
             ),
         )
@@ -475,6 +567,7 @@ def execute_asr_pipeline(
                 transcription_result=transcription_result,
                 audio_path=audio_path,
                 settings=settings,
+                execution_config=execution_config,
                 language_code=language_code,
             ),
         )
@@ -539,11 +632,12 @@ def _align_transcription_result(
     transcription_result: dict[str, Any],
     audio_path: Path,
     settings: Settings,
+    execution_config: AsrExecutionConfig,
     language_code: str,
 ) -> dict[str, Any]:
     align_model, align_metadata = whisperx.load_align_model(
         language_code=language_code,
-        device=settings.whisperx_device,
+        device=execution_config.device,
         model_name=_resolve_alignment_model_ref(settings),
         model_dir=str(_alignment_model_target_dir(settings)),
     )
@@ -552,7 +646,7 @@ def _align_transcription_result(
         align_model,
         align_metadata,
         str(audio_path),
-        settings.whisperx_device,
+        execution_config.device,
         return_char_alignments=False,
     )
 
@@ -787,21 +881,26 @@ def _elapsed_ms(started_at: float) -> int:
     return max(0, round((time.perf_counter() - started_at) * 1000))
 
 
-def _build_model_metadata(settings: Settings) -> dict[str, Any]:
+def _build_model_metadata(settings: Settings, *, execution_config: AsrExecutionConfig) -> dict[str, Any]:
     if not settings.whisperx_model_name:
         raise AsrFailure(
             code="missing_model",
             message="WhisperX model configuration is missing. Set APP_WHISPERX_MODEL_NAME and provision the model before retrying.",
         )
-    return {
+    metadata = {
         "provider": "whisperx",
         "model_name": settings.whisperx_model_name,
         "alignment_model_name": settings.whisperx_alignment_model_name,
-        "device": settings.whisperx_device,
-        "compute_type": settings.whisperx_compute_type,
+        "device": execution_config.device,
+        "compute_type": execution_config.compute_type,
+        "requested_device": settings.whisperx_device,
+        "requested_compute_type": settings.whisperx_compute_type,
         "language": settings.whisperx_language,
         "batch_size": settings.whisperx_batch_size,
     }
+    if execution_config.fallback_reason:
+        metadata["runtime_warning"] = execution_config.fallback_reason
+    return metadata
 
 
 def _resolve_input_audio_path(task_id: str, record) -> Path:
@@ -899,6 +998,14 @@ def _classify_asr_exception(exc: Exception, *, settings: Settings) -> AsrFailure
         return AsrFailure(
             code="oom",
             message="WhisperX ran out of memory. Free GPU/CPU memory or lower the configured model footprint before retrying.",
+        )
+    if "cuda driver version is insufficient for cuda runtime version" in normalized:
+        return AsrFailure(
+            code="unsupported_runtime",
+            message=(
+                "WhisperX requested a CUDA execution path, but the installed backend does not support it on this host. "
+                "Use a supported CTranslate2 GPU backend or switch WhisperX to a CPU compute type."
+            ),
         )
     return AsrFailure(
         code="alignment_failed",

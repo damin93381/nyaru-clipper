@@ -17,6 +17,7 @@ from app.services.asr_whisperx import (
     load_asr_result_manifest,
     publish_asr_artifacts_from_manifest,
 )
+from app.services.failure_codes import failure_code_from_exception
 from app.services.downloader import download_bilibili_vod
 from app.services.highlights import analyze_task_highlights
 from app.services.media_prep import prepare_media_for_asr
@@ -293,6 +294,7 @@ def run_task_pipeline(
                         job=job,
                         stage=stage,
                         summary=_failure_summary(exc),
+                        failure_code=failure_code_from_exception(stage_name, exc),
                     )
                     session.add(task)
                     session.add(job)
@@ -371,6 +373,7 @@ def _sync_running_claim(*, task: Task, job: TaskJob, stage: TaskStage) -> None:
     job.stage_name = stage.name
     job.updated_at = now
     stage.status = "running"
+    stage.failure_code = None
     stage.started_at = stage.started_at or now
     stage.updated_at = now
 
@@ -385,6 +388,7 @@ def _mark_stage_running(*, task: Task, job: TaskJob, stage: TaskStage) -> None:
     job.finished_at = None
     job.updated_at = now
     stage.status = "running"
+    stage.failure_code = None
     stage.started_at = now
     stage.finished_at = None
     stage.attempts += 1
@@ -395,11 +399,12 @@ def _mark_stage_success(stage: TaskStage, *, summary: str) -> None:
     now = utc_now()
     stage.status = "success"
     stage.summary = summary
+    stage.failure_code = None
     stage.finished_at = now
     stage.updated_at = now
 
 
-def _mark_stage_failed(*, task: Task, job: TaskJob, stage: TaskStage, summary: str) -> None:
+def _mark_stage_failed(*, task: Task, job: TaskJob, stage: TaskStage, summary: str, failure_code: str) -> None:
     now = utc_now()
     task.status = "failed"
     task.updated_at = now
@@ -409,6 +414,7 @@ def _mark_stage_failed(*, task: Task, job: TaskJob, stage: TaskStage, summary: s
     job.updated_at = now
     stage.status = "failed"
     stage.summary = summary
+    stage.failure_code = failure_code
     stage.finished_at = now
     stage.updated_at = now
 
@@ -417,6 +423,8 @@ def _apply_stage_directive(*, stage: TaskStage, directive: StageDirective) -> No
     now = utc_now()
     stage.status = directive.status
     stage.summary = directive.summary
+    if directive.status in {"success", "skipped", "pending", "running"}:
+        stage.failure_code = None
     stage.finished_at = now
     stage.updated_at = now
 

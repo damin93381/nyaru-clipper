@@ -63,6 +63,7 @@ class TaskStage(SQLModel, table=True):
     name: str = Field(index=True)
     status: str = Field(default="pending", index=True)
     summary: str | None = Field(default=None)
+    failure_code: str | None = Field(default=None, index=True)
     attempts: int = Field(default=0)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

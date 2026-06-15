@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from sqlalchemy import inspect, text
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -31,7 +32,22 @@ def reset_db_runtime() -> None:
 def init_db() -> None:
     from app import models  # noqa: F401
 
-    SQLModel.metadata.create_all(get_engine())
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    _run_lightweight_schema_migrations(engine)
+
+
+def _run_lightweight_schema_migrations(engine) -> None:
+    if not str(engine.url).startswith("sqlite"):
+        return
+    inspector = inspect(engine)
+    if "taskstage" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("taskstage")}
+    if "failure_code" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE taskstage ADD COLUMN failure_code VARCHAR"))
 
 
 def get_session() -> Iterator[Session]:

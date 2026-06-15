@@ -21,6 +21,8 @@ from app.models import (
     TERMINAL_STATUSES,
     utc_now,
 )
+from app.services.failure_codes import failure_code_from_stage
+from app.services.recovery_actions import serialize_recovery_actions, stage_display_label
 from app.services.storage import build_artifact_content_path, ensure_task_dirs, summarize_stage_log
 
 BV_PATTERN = re.compile(r"(BV[0-9A-Za-z]+)", re.IGNORECASE)
@@ -49,6 +51,7 @@ def _serialize_stage(stage: TaskStage) -> dict[str, Any]:
         "name": stage.name,
         "status": stage.status,
         "summary": stage.summary,
+        "failure_code": failure_code_from_stage(stage),
         "attempts": stage.attempts,
     }
 
@@ -108,7 +111,7 @@ def _serialize_failure_recovery(task: Task, stages: list[TaskStage]) -> dict[str
         return None
 
     asr_stage = next((stage for stage in stages if stage.name == "asr"), None)
-    if asr_stage is None or asr_stage.status != "failed" or asr_stage.summary != "missing_model":
+    if asr_stage is None or asr_stage.status != "failed" or failure_code_from_stage(asr_stage) != "asr_missing_model":
         return None
 
     from app.services.asr_whisperx import build_asr_missing_model_recovery
@@ -117,15 +120,90 @@ def _serialize_failure_recovery(task: Task, stages: list[TaskStage]) -> dict[str
     return build_asr_missing_model_recovery(get_settings())
 
 
-def _task_to_response(task: Task, stages: list[TaskStage], *, created: bool | None = None) -> dict[str, Any]:
+def _task_failure_code(task: Task, stages: list[TaskStage]) -> str | None:
+    if task.status != "failed":
+        return None
+    failed_stage = next((stage for stage in stages if stage.status == "failed"), None)
+    if failed_stage is None:
+        return "unknown_failure"
+    return failure_code_from_stage(failed_stage) or "unknown_failure"
+
+
+_EXPECTED_ARTIFACT_KINDS = {
+    "ingest": ("source_video", ("source_video",)),
+    "media_prep": ("prepared_audio", ("prepared_audio", "asr_audio")),
+    "asr": ("transcript_json", ("transcript_json",)),
+    "translation": ("translated_segments", ("translated_segments", "bilingual_transcript_json")),
+    "highlight": ("highlight_candidates", ("highlight_candidates", "highlight_candidates_json")),
+    "export": ("clip_video", ("clip_video", "exported_clip")),
+    "report": ("report", ("report", "task_report_markdown")),
+}
+
+
+def _artifact_readiness_status(stage: TaskStage, *, artifact: Artifact | None) -> str:
+    if artifact is not None and Path(artifact.path).exists():
+        return "ready"
+    if stage.status == "failed":
+        return "failed"
+    if stage.status == "success" and stage.name == "asr":
+        return "missing"
+    return "not_ready"
+
+
+def _serialize_artifact_readiness(stages: list[TaskStage], artifacts: list[Artifact]) -> list[dict[str, Any]]:
+    artifact_by_stage_kind: dict[tuple[str, str], Artifact] = {}
+    for artifact in artifacts:
+        artifact_by_stage_kind[(artifact.stage_name, artifact.kind)] = artifact
+
+    items: list[dict[str, Any]] = []
+    for stage in stages:
+        if stage.name not in _EXPECTED_ARTIFACT_KINDS:
+            continue
+        public_kind, stored_kinds = _EXPECTED_ARTIFACT_KINDS[stage.name]
+        artifact = next(
+            (artifact_by_stage_kind.get((stage.name, stored_kind)) for stored_kind in stored_kinds if artifact_by_stage_kind.get((stage.name, stored_kind)) is not None),
+            None,
+        )
+        artifact_id = int(artifact.id) if artifact is not None and artifact.id is not None else None
+        items.append(
+            {
+                "stage_name": stage.name,
+                "kind": public_kind,
+                "status": _artifact_readiness_status(stage, artifact=artifact),
+                "artifact_id": artifact_id,
+                "path": build_artifact_content_path(
+                    task_id=artifact.task_id,
+                    artifact_id=artifact_id,
+                    artifact_path=artifact.path,
+                )
+                if artifact is not None and artifact_id is not None
+                else None,
+            }
+        )
+        if stage.status == "failed":
+            break
+    return items
+
+
+def _task_to_response(
+    task: Task,
+    stages: list[TaskStage],
+    *,
+    artifacts: list[Artifact] | None = None,
+    created: bool | None = None,
+) -> dict[str, Any]:
     payload = {
         "task_id": task.id,
         "source_url": task.source_url,
         "normalized_source_url": task.normalized_source_url,
         "source_video_id": task.source_video_id,
         "status": task.status,
+        "failure_code": _task_failure_code(task, stages),
+        "recovery_actions": serialize_recovery_actions(task_id=task.id, task_status=task.status, stages=stages),
         "stages": [_serialize_stage(stage) for stage in stages],
     }
+    if artifacts is not None:
+        payload["artifact_readiness"] = _serialize_artifact_readiness(stages, artifacts)
     failure_recovery = _serialize_failure_recovery(task, stages)
     if failure_recovery is not None:
         payload["failure_recovery"] = failure_recovery
@@ -220,7 +298,7 @@ def create_task(session: Session, source_url: str) -> tuple[dict[str, Any], bool
     if existing is not None:
         record = get_task_record(session, existing.id)
         assert record is not None
-        return _task_to_response(record.task, record.stages, created=False), False
+        return _task_to_response(record.task, record.stages, artifacts=record.artifacts, created=False), False
 
     task_id = f"task-{uuid4().hex[:12]}"
     ensure_task_dirs(task_id)
@@ -241,14 +319,14 @@ def create_task(session: Session, source_url: str) -> tuple[dict[str, Any], bool
     for stage in stages:
         session.refresh(stage)
     session.refresh(task)
-    return _task_to_response(task, stages, created=True), True
+    return _task_to_response(task, stages, artifacts=[], created=True), True
 
 
 def get_task_detail(session: Session, task_id: str) -> dict[str, Any] | None:
     record = get_task_record(session, task_id)
     if record is None:
         return None
-    payload = _task_to_response(record.task, record.stages)
+    payload = _task_to_response(record.task, record.stages, artifacts=record.artifacts)
     execution_progress = _serialize_execution_progress(record.execution_progress)
     if execution_progress is not None:
         payload["execution_progress"] = execution_progress
@@ -280,15 +358,30 @@ def list_task_log_summaries(session: Session, task_id: str) -> list[dict[str, An
     record = get_task_record(session, task_id)
     if record is None:
         return None
-    return [
-        {
-            "stage_name": stage.name,
-            "status": stage.status,
-            "summary": summarize_stage_log(task_id, stage.name) or stage.summary,
-            "log_path": str(Path("/data/tasks") / task_id / "logs" / f"{stage.name}.log"),
-        }
-        for stage in record.stages
-    ]
+    summaries: list[dict[str, Any]] = []
+    for stage in record.stages:
+        summary = summarize_stage_log(task_id, stage.name) or stage.summary
+        summaries.append(
+            {
+                "stage_name": stage.name,
+                "status": stage.status,
+                "summary": summary,
+                "display_label": stage_display_label(stage.name),
+                "safe_summary": _redact_log_summary(summary),
+                "log_path": str(Path("/data/tasks") / task_id / "logs" / f"{stage.name}.log"),
+            }
+        )
+    return summaries
+
+
+def _redact_log_summary(summary: str | None) -> str | None:
+    if summary is None:
+        return None
+    redacted = re.sub(r"(?i)(token|secret|password|cookie|key)\s*[=:]\s*\S+", r"\1 [redacted]", summary)
+    redacted = re.sub(r"(?i)\b(token|secret|password|cookie|key)\s+[A-Za-z0-9._~+/=-]{4,}\b", r"\1 [redacted]", redacted)
+    redacted = re.sub(r"(?<!\w)/(?:home|tmp|var|mnt|data|Users)/[^\s]+", "[path]", redacted)
+    redacted = re.sub(r"\$[A-Z_][A-Z0-9_]*", "[env]", redacted)
+    return redacted
 
 
 def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> dict[str, Any] | None:
@@ -304,6 +397,7 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
         if stage_index >= reset_index:
             stage.status = "pending"
             stage.summary = None
+            stage.failure_code = None
             stage.started_at = None
             stage.finished_at = None
             stage.updated_at = utc_now()
