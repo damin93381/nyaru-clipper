@@ -36,3 +36,11 @@
 - Stage logs should prefer `display_label` and `safe_summary` in the timeline; raw `log_path` remains available only under the `技术日志路径` disclosure for operator diagnostics.
 - ASR missing-model recovery keeps the existing model-download endpoint but changes the primary action copy to `下载缺失模型` to match the recovery-action contract.
 - Verification: `pnpm --dir web test --run -- src/pages/__tests__/TaskDetailPage.test.tsx` passed (52 tests across the web Vitest suite because the command form runs all configured tests).
+
+## 2026-06-16 - Wave 4 deterministic Playwright recovery journeys
+
+- `TaskDetailPage` now passes backend `artifact_readiness` into `WorkspacePage`, so E2E fixtures can assert readiness-contract driven workspace states rather than relying on missing artifact fallbacks.
+- Task detail Playwright fixtures must include safe summaries for pending log records; otherwise `classifyTaskState` correctly treats pending empty logs as `log_not_ready` before generic failed-state rendering.
+- Added routed E2E coverage for ASR missing-model download action with raw log paths hidden behind `技术日志路径`, generic translation retry payloads, task-not-found recovery, artifact not-ready/load-error states, and client-side export range blocking with no `/clips` request.
+- Requirements exports were stale before final verification; regenerated them with `./scripts/export_backend_requirements.sh` and verified `./scripts/export_backend_requirements.sh --check` afterwards.
+- Verification: `pnpm --dir web test --run && pnpm --dir web build && pnpm --dir web test:e2e -- task-detail.spec.ts workspace.spec.ts && ./scripts/export_backend_requirements.sh --check` passed (52 Vitest tests, production build, 9 Playwright tests, all requirements files up to date).

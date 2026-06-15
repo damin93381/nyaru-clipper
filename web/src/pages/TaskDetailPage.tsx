@@ -842,7 +842,11 @@ export function TaskDetailPage() {
 				</section>
 			</div>
 
-			<WorkspacePage artifacts={artifacts} taskId={taskId} />
+			<WorkspacePage
+				artifactReadiness={taskDetailQuery.data.artifact_readiness}
+				artifacts={artifacts}
+				taskId={taskId}
+			/>
 		</section>
 	);
 }
