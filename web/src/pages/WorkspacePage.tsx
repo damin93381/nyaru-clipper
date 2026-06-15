@@ -13,6 +13,11 @@ import {
 	WORKSPACE_COPY,
 } from "../lib/copy/workspace";
 import {
+	type ArtifactReadinessClassification,
+	classifyArtifactReadiness,
+} from "../lib/taskState";
+import {
+	type ArtifactReadinessRecord,
 	type ArtifactRecord,
 	type ClipExportResponse,
 	type HighlightArtifactPayload,
@@ -24,6 +29,7 @@ import {
 interface WorkspacePageProps {
 	taskId: string;
 	artifacts: ArtifactRecord[];
+	artifactReadiness?: ArtifactReadinessRecord[];
 }
 
 interface CandidateRangeState {
@@ -47,6 +53,38 @@ interface SubtitleRow {
 	chineseText: string;
 	translatedText: string | null;
 }
+
+interface ArtifactQueryState {
+	isError: boolean;
+	isLoading: boolean;
+	refetch: () => Promise<unknown>;
+}
+
+type ArtifactSectionState =
+	| ArtifactReadinessClassification
+	| "empty"
+	| "loading";
+
+type CandidateExportErrors = Record<string, string | undefined>;
+
+const READINESS_PRIORITY: Record<ArtifactReadinessClassification, number> = {
+	load_error: 5,
+	missing: 4,
+	failed: 3,
+	not_ready: 2,
+	ready: 1,
+};
+
+const SUBTITLE_READINESS_KINDS = new Set([
+	"transcript_json",
+	"translated_segments",
+	"bilingual_transcript_json",
+]);
+
+const HIGHLIGHT_READINESS_KINDS = new Set([
+	"highlight_candidates",
+	"highlight_candidates_json",
+]);
 
 const DOWNLOADABLE_ARTIFACT_KINDS = new Set([
 	"transcript_json",
@@ -76,6 +114,100 @@ function getCandidateKey(candidate: HighlightWorkspaceCandidate): string {
 
 function formatTimestamp(startSeconds: number, endSeconds: number): string {
 	return `${startSeconds.toFixed(3)}s → ${endSeconds.toFixed(3)}s`;
+}
+
+function getArtifactReadinessState(
+	readiness: ArtifactReadinessRecord[] | undefined,
+	kinds: Set<string>,
+): ArtifactReadinessClassification | null {
+	const records = readiness?.filter((record) => kinds.has(record.kind)) ?? [];
+	if (records.length === 0) {
+		return null;
+	}
+
+	return records
+		.map((record) => classifyArtifactReadiness(record.status))
+		.sort(
+			(left, right) => READINESS_PRIORITY[right] - READINESS_PRIORITY[left],
+		)[0];
+}
+
+function getArtifactSectionState(options: {
+	hasArtifact: boolean;
+	isTrueEmpty: boolean;
+	queries: ArtifactQueryState[];
+	readiness?: ArtifactReadinessRecord[];
+	readinessKinds: Set<string>;
+}): ArtifactSectionState {
+	if (options.queries.some((query) => query.isError)) {
+		return classifyArtifactReadiness("load_error");
+	}
+
+	if (options.queries.some((query) => query.isLoading)) {
+		return "loading";
+	}
+
+	const readinessState = getArtifactReadinessState(
+		options.readiness,
+		options.readinessKinds,
+	);
+	if (readinessState && readinessState !== "ready") {
+		return readinessState;
+	}
+
+	if (!options.hasArtifact && !readinessState) {
+		return classifyArtifactReadiness("not_ready");
+	}
+
+	if (options.isTrueEmpty) {
+		return "empty";
+	}
+
+	return "ready";
+}
+
+function getReadinessMessage(
+	state: Exclude<ArtifactSectionState, "ready">,
+): string {
+	const { messages } = WORKSPACE_COPY.readiness;
+	switch (state) {
+		case "loading":
+			return messages.loading;
+		case "not_ready":
+			return messages.not_ready;
+		case "missing":
+			return messages.missing;
+		case "failed":
+			return messages.failed;
+		case "load_error":
+			return messages.load_error;
+		case "empty":
+			return messages.empty;
+	}
+}
+
+function WorkspaceSectionStateMessage({
+	onRetry,
+	state,
+}: {
+	onRetry?: () => void;
+	state: Exclude<ArtifactSectionState, "ready">;
+}) {
+	const isLoadError = state === "load_error";
+
+	return (
+		<div
+			aria-live="polite"
+			className={`workspace-empty-state workspace-state-card workspace-state-card--${state}`}
+		>
+			<p>{getReadinessMessage(state)}</p>
+			{isLoadError ? (
+				<button className="secondary-button" onClick={onRetry} type="button">
+					{WORKSPACE_COPY.readiness.messages.retrySection}
+				</button>
+			) : null}
+		</div>
+	);
 }
 
 function buildSubtitleRows(
@@ -132,7 +264,11 @@ function toExportedClipArtifactFromResponse(
 	};
 }
 
-export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
+export function WorkspacePage({
+	artifactReadiness,
+	artifacts,
+	taskId,
+}: WorkspacePageProps) {
 	const { header, subtitles, candidates, downloads, exportedClips } =
 		WORKSPACE_COPY;
 	const transcriptArtifact = useMemo(
@@ -199,6 +335,8 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 	const [localClipArtifacts, setLocalClipArtifacts] = useState<
 		ExportedClipArtifact[]
 	>([]);
+	const [candidateExportErrors, setCandidateExportErrors] =
+		useState<CandidateExportErrors>({});
 
 	useEffect(() => {
 		const candidates = highlightQuery.data?.candidates ?? [];
@@ -250,7 +388,15 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 				end_s,
 			});
 		},
+		onError: (error, candidate) => {
+			const key = getCandidateKey(candidate);
+			setCandidateExportErrors((current) => ({
+				...current,
+				[key]: error instanceof Error ? error.message : candidates.exportFailed,
+			}));
+		},
 		onSuccess: (response) => {
+			setCandidateExportErrors({});
 			setLocalClipArtifacts((current) => {
 				const nextArtifact = toExportedClipArtifactFromResponse(response);
 				const withoutDuplicate = current.filter(
@@ -273,9 +419,74 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 
 	const zeroCandidateMessage =
 		highlightQuery.data?.no_candidates ??
-		(highlightQuery.data && (highlightQuery.data.candidates?.length ?? 0) === 0
+		(highlightQuery.data?.candidate_count === 0
 			? candidates.zeroCandidateFallback
 			: null);
+
+	const subtitleSectionState = getArtifactSectionState({
+		hasArtifact: Boolean(transcriptPath || bilingualPath),
+		isTrueEmpty: Boolean(
+			(transcriptQuery.data || bilingualQuery.data) &&
+				subtitleRows.length === 0,
+		),
+		queries: [transcriptQuery, bilingualQuery],
+		readiness: artifactReadiness,
+		readinessKinds: SUBTITLE_READINESS_KINDS,
+	});
+	const highlightSectionState = getArtifactSectionState({
+		hasArtifact: Boolean(highlightPath),
+		isTrueEmpty: Boolean(
+			highlightQuery.data &&
+				(highlightQuery.data.candidates?.length ?? 0) === 0 &&
+				!zeroCandidateMessage,
+		),
+		queries: [highlightQuery],
+		readiness: artifactReadiness,
+		readinessKinds: HIGHLIGHT_READINESS_KINDS,
+	});
+
+	function retrySubtitleSection() {
+		void transcriptQuery.refetch();
+		void bilingualQuery.refetch();
+	}
+
+	function retryHighlightSection() {
+		void highlightQuery.refetch();
+	}
+
+	function handleExportCandidate(candidate: HighlightWorkspaceCandidate) {
+		const key = getCandidateKey(candidate);
+		const range = candidateRanges[key] ?? {
+			start: String(candidate.default_range?.start_s ?? candidate.start_s),
+			end: String(candidate.default_range?.end_s ?? candidate.end_s),
+		};
+		const start = Number(range.start);
+		const end = Number(range.end);
+
+		if (start < 0 || end < 0) {
+			setCandidateExportErrors((current) => ({
+				...current,
+				[key]: candidates.invalidNegativeRange,
+			}));
+			exportClipMutation.reset();
+			return;
+		}
+
+		if (start >= end) {
+			setCandidateExportErrors((current) => ({
+				...current,
+				[key]: candidates.invalidRangeOrder,
+			}));
+			exportClipMutation.reset();
+			return;
+		}
+
+		setCandidateExportErrors((current) => ({
+			...current,
+			[key]: undefined,
+		}));
+		exportClipMutation.mutate(candidate);
+	}
 
 	return (
 		<section className="panel workspace-panel">
@@ -296,7 +507,16 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 						</div>
 					</div>
 
-					{subtitleRows.length > 0 ? (
+					{subtitleSectionState !== "ready" ? (
+						<WorkspaceSectionStateMessage
+							onRetry={
+								subtitleSectionState === "load_error"
+									? retrySubtitleSection
+									: undefined
+							}
+							state={subtitleSectionState}
+						/>
+					) : subtitleRows.length > 0 ? (
 						<div className="subtitle-table">
 							<div className="subtitle-table__header">
 								<span>{subtitles.columns.segment}</span>
@@ -316,9 +536,7 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 								</div>
 							))}
 						</div>
-					) : (
-						<p className="support-copy">{subtitles.empty}</p>
-					)}
+					) : null}
 				</section>
 
 				<section className="workspace-section">
@@ -329,8 +547,17 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 						</div>
 					</div>
 
-					{highlightQuery.data?.candidates &&
-					highlightQuery.data.candidates.length > 0 ? (
+					{highlightSectionState !== "ready" ? (
+						<WorkspaceSectionStateMessage
+							onRetry={
+								highlightSectionState === "load_error"
+									? retryHighlightSection
+									: undefined
+							}
+							state={highlightSectionState}
+						/>
+					) : highlightQuery.data?.candidates &&
+						highlightQuery.data.candidates.length > 0 ? (
 						<ol className="candidate-list">
 							{highlightQuery.data.candidates.map((candidate) => {
 								const key = getCandidateKey(candidate);
@@ -342,6 +569,7 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 										candidate.default_range?.end_s ?? candidate.end_s,
 									),
 								};
+								const exportError = candidateExportErrors[key];
 
 								return (
 									<li className="candidate-card" key={key}>
@@ -430,15 +658,16 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 												candidate.candidate_id === undefined ||
 												exportClipMutation.isPending
 											}
-											onClick={() => {
-												void exportClipMutation.mutateAsync(candidate);
-											}}
+											onClick={() => handleExportCandidate(candidate)}
 											type="button"
 										>
 											{exportClipMutation.isPending
 												? candidates.confirmPending
 												: candidates.confirmIdle}
 										</button>
+										{exportError ? (
+											<p className="form-error field__error">{exportError}</p>
+										) : null}
 									</li>
 								);
 							})}
@@ -452,14 +681,6 @@ export function WorkspacePage({ taskId, artifacts }: WorkspacePageProps) {
 					) : (
 						<p className="support-copy">{candidates.empty}</p>
 					)}
-
-					{exportClipMutation.isError ? (
-						<p className="form-error">
-							{exportClipMutation.error instanceof Error
-								? exportClipMutation.error.message
-								: candidates.exportFailed}
-						</p>
-					) : null}
 				</section>
 			</div>
 

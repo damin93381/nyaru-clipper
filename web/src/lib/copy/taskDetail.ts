@@ -10,9 +10,49 @@ export const TASK_DETAIL_COPY = {
     title: "无法加载该任务。",
     unknownError: "未知错误",
   },
+  notFound: {
+    eyebrow: "任务不存在",
+    title: "任务不存在",
+    description: "该任务可能已被清理，或任务 ID 不正确。",
+    action: "返回新建任务",
+  },
   summary: {
     eyebrow: "任务详情",
     title: (taskId: string) => `任务 ${taskId}`,
+  },
+  statePanels: {
+    queued: {
+      eyebrow: "队列状态",
+      title: "等待处理中",
+      description: "任务已进入队列，等待单机 worker 领取处理。",
+    },
+    active: {
+      eyebrow: "当前状态",
+      title: "正在处理",
+      description: "任务正在执行，请保留页面以查看阶段进度。",
+      cancelAction: "取消任务",
+      cancelUnavailable: "当前版本仅展示取消入口；实际取消请使用后端任务控制接口。",
+    },
+    failed: {
+      eyebrow: "恢复状态",
+      title: "处理失败",
+      terminalTitle: "处理失败",
+      retryPending: "正在重试此阶段...",
+    },
+    asrMissingModel: {
+      eyebrow: "恢复状态",
+      title: "ASR 模型缺失",
+    },
+    cancelled: {
+      eyebrow: "终止状态",
+      title: "任务已取消",
+      description: "任务已停止，不会继续生成新的阶段产物。",
+    },
+    success: {
+      eyebrow: "完成状态",
+      title: "任务已完成",
+      description: "所有流水线阶段已完成，可在下方工作区查看产物。",
+    },
   },
   progress: {
     eyebrow: "ASR 运行态",
@@ -43,6 +83,7 @@ export const TASK_DETAIL_COPY = {
     recovery: (stageLabel: string) => `可从 ${stageLabel} 重新尝试。上游已成功阶段保持不变，下游阶段继续等待。`,
     fallbackMessages: {
       unknown_failure: "处理失败，请查看安全日志摘要后重试该阶段。",
+      asr_missing_model: "ASR 模型缺失，请先下载所需模型后重试 ASR 阶段。",
       asr_oom: "ASR 运行时显存不足，请释放 GPU 资源后重试。",
       asr_alignment_failed: "ASR 字幕对齐失败，请查看日志并重试 ASR。",
       asr_child_failed: "ASR 子进程失败，请查看安全日志摘要。",
@@ -71,6 +112,7 @@ export const TASK_DETAIL_COPY = {
         description: "查看安全日志摘要和技术日志路径。",
       },
     },
+    retryErrorFallback: "重试请求失败，请稍后再试。",
     missingModel: {
       eyebrow: "ASR 模型恢复",
       title: "缺失模型处理",
@@ -86,6 +128,8 @@ export const TASK_DETAIL_COPY = {
     pollingTerminal: "每 15 秒轮询",
     attempts: (count: number) => `尝试次数：${count}`,
     noStageLog: "暂无阶段日志",
+    technicalLogPath: "技术日志路径",
+    safeLogFallback: "暂无安全日志摘要。",
   },
   artifacts: {
     eyebrow: GLOSSARY_TERMS.artifacts,

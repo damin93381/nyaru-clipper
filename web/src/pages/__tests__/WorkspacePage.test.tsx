@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 
 import { exportTaskClip, fetchArtifactJson } from "../../lib/api";
 import type { ArtifactRecord } from "../../lib/types";
@@ -14,7 +15,12 @@ vi.mock("../../lib/api", async (importOriginal) => {
   };
 });
 
-function renderPage(artifacts: ArtifactRecord[]) {
+type WorkspacePageProps = ComponentProps<typeof WorkspacePage>;
+
+function renderPage(
+  artifacts: ArtifactRecord[],
+  props: Partial<Pick<WorkspacePageProps, "artifactReadiness">> = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -24,7 +30,7 @@ function renderPage(artifacts: ArtifactRecord[]) {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <WorkspacePage artifacts={artifacts} taskId="task-workspace123" />
+      <WorkspacePage artifacts={artifacts} taskId="task-workspace123" {...props} />
     </QueryClientProvider>,
   );
 }
@@ -208,5 +214,144 @@ describe("WorkspacePage", () => {
     expect(screen.queryByTestId("candidate-confirm-button")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^下载双语字幕$/ })).toBeVisible();
     expect(screen.getByRole("link", { name: "下载任务报告" })).toBeVisible();
+  });
+
+  it("distinguishes artifact load errors from truly empty workspace data", async () => {
+    vi.mocked(fetchArtifactJson).mockRejectedValue(new Error("network down"));
+
+    const firstRender = renderPage(baseArtifacts);
+
+    expect(await screen.findAllByText("加载工作台数据失败")).not.toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: "重新加载此区域" })[0]).toBeVisible();
+    expect(screen.queryByText("暂无数据")).not.toBeInTheDocument();
+
+    firstRender.unmount();
+
+    vi.clearAllMocks();
+    vi.mocked(fetchArtifactJson).mockImplementation(async (path: string) => {
+      if (path.includes("highlight-candidates")) {
+        return {
+          candidate_count: undefined,
+          no_candidates: null,
+          candidates: [],
+        };
+      }
+
+      return { segments: [] };
+    });
+
+    renderPage(baseArtifacts);
+
+    expect(await screen.findAllByText("暂无数据")).toHaveLength(2);
+    expect(screen.queryByText("加载工作台数据失败")).not.toBeInTheDocument();
+  });
+
+  it("shows backend artifact readiness states before treating sections as empty", () => {
+    renderPage([], {
+      artifactReadiness: [
+        {
+          kind: "transcript_json",
+          stage_name: "asr",
+          status: "not_ready",
+          artifact_id: null,
+          path: null,
+        },
+        {
+          kind: "highlight_candidates",
+          stage_name: "highlight",
+          status: "missing",
+          artifact_id: null,
+          path: null,
+        },
+      ],
+    });
+
+    expect(screen.getByText("该数据尚未生成")).toBeInTheDocument();
+    expect(screen.getByText("产物缺失，可重试生成阶段")).toBeInTheDocument();
+    expect(screen.queryByText("暂无数据")).not.toBeInTheDocument();
+  });
+
+  it("blocks invalid export ranges before calling the backend", async () => {
+    vi.mocked(fetchArtifactJson).mockImplementation(async (path: string) => {
+      if (path.includes("highlight-candidates")) {
+        return {
+          candidate_count: 1,
+          no_candidates: null,
+          candidates: [
+            {
+              candidate_id: 41,
+              rank: 1,
+              start_s: 18,
+              end_s: 42,
+              score: 0.91,
+              reasons: [],
+              default_range: { start_s: 16, end_s: 44 },
+            },
+          ],
+        };
+      }
+
+      return { segments: [] };
+    });
+
+    renderPage(baseArtifacts);
+
+    const startInput = await screen.findByTestId("candidate-start-input");
+    const endInput = screen.getByTestId("candidate-end-input");
+
+    fireEvent.change(startInput, { target: { value: "45" } });
+    fireEvent.change(endInput, { target: { value: "45" } });
+    fireEvent.click(screen.getByTestId("candidate-confirm-button"));
+
+    expect(await screen.findByText("开始时间必须早于结束时间")).toBeInTheDocument();
+    expect(exportTaskClip).not.toHaveBeenCalled();
+    expect(startInput).toHaveValue(45);
+    expect(endInput).toHaveValue(45);
+
+    fireEvent.change(startInput, { target: { value: "-1" } });
+    fireEvent.change(endInput, { target: { value: "3" } });
+    fireEvent.click(screen.getByTestId("candidate-confirm-button"));
+
+    expect(await screen.findByText("时间不能小于 0 秒")).toBeInTheDocument();
+    expect(exportTaskClip).not.toHaveBeenCalled();
+    expect(startInput).toHaveValue(-1);
+    expect(endInput).toHaveValue(3);
+  });
+
+  it("surfaces backend export errors without clearing edited clip times", async () => {
+    vi.mocked(fetchArtifactJson).mockImplementation(async (path: string) => {
+      if (path.includes("highlight-candidates")) {
+        return {
+          candidate_count: 1,
+          no_candidates: null,
+          candidates: [
+            {
+              candidate_id: 41,
+              rank: 1,
+              start_s: 18,
+              end_s: 42,
+              score: 0.91,
+              reasons: [],
+              default_range: { start_s: 16, end_s: 44 },
+            },
+          ],
+        };
+      }
+
+      return { segments: [] };
+    });
+    vi.mocked(exportTaskClip).mockRejectedValue(new Error("outside the source duration"));
+
+    renderPage(baseArtifacts);
+
+    const startInput = await screen.findByTestId("candidate-start-input");
+    const endInput = screen.getByTestId("candidate-end-input");
+    fireEvent.change(startInput, { target: { value: "12" } });
+    fireEvent.change(endInput, { target: { value: "120" } });
+    fireEvent.click(screen.getByTestId("candidate-confirm-button"));
+
+    expect(await screen.findByText("outside the source duration")).toBeInTheDocument();
+    expect(startInput).toHaveValue(12);
+    expect(endInput).toHaveValue(120);
   });
 });

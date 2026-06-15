@@ -2,13 +2,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-import { downloadAsrModels, getTaskArtifacts, getTaskDetail, getTaskLogs, getTaskStages } from "../../lib/api";
+import {
+  ApiError,
+  downloadAsrModels,
+  getTaskArtifacts,
+  getTaskDetail,
+  getTaskLogs,
+  getTaskStages,
+  retryTaskFromStage,
+} from "../../lib/api";
 import type {
   ArtifactRecord,
   AsrMissingModelRecovery,
   StageLogSummary,
   TaskDetail,
   TaskExecutionProgress,
+  TaskRecoveryAction,
+  TaskStageName,
   TaskStageRecord,
 } from "../../lib/types";
 import { getPollingInterval, TaskDetailPage } from "../TaskDetailPage";
@@ -21,15 +31,50 @@ vi.mock("../../lib/api", async (importOriginal) => {
       getTaskDetail: vi.fn(),
       getTaskStages: vi.fn(),
       getTaskArtifacts: vi.fn(),
-    getTaskLogs: vi.fn(),
+      getTaskLogs: vi.fn(),
+      retryTaskFromStage: vi.fn(),
   };
 });
+
+function retryAction(stageName: TaskStageName, enabled = true): TaskRecoveryAction {
+  return {
+    id: "retry_stage",
+    enabled,
+    method: "POST",
+    endpoint: "/api/tasks/task-fixture123/retry",
+    label_key: "retry_stage",
+    description_key: "retry_stage",
+    payload: { stage_name: stageName },
+    confirmation_required: false,
+    success_behavior: "refresh_task",
+  };
+}
+
+function downloadModelAction(): TaskRecoveryAction {
+  return {
+    id: "download_asr_model",
+    enabled: true,
+    method: "POST",
+    endpoint: "/api/tasks/task-fixture123/asr/models/download",
+    label_key: "download_asr_model",
+    description_key: "download_asr_model",
+    confirmation_required: false,
+    success_behavior: "refresh_task",
+  };
+}
 
 const canonicalStages: TaskStageRecord[] = [
   { name: "ingest", status: "success", summary: "Downloaded source video via bbdown", attempts: 1 },
   { name: "media_prep", status: "success", summary: "Prepared ffprobe metadata and ASR wav", attempts: 1 },
   { name: "asr", status: "success", summary: "Generated aligned transcript and Chinese subtitles", attempts: 1 },
-  { name: "translation", status: "failed", summary: "translation_failed", attempts: 2 },
+  {
+    name: "translation",
+    status: "failed",
+    summary: "translation_failed",
+    failure_code: "unknown_failure",
+    recovery_actions: [retryAction("translation")],
+    attempts: 2,
+  },
   { name: "highlight", status: "pending", summary: null, attempts: 0 },
   { name: "export", status: "pending", summary: null, attempts: 0 },
   { name: "report", status: "pending", summary: null, attempts: 0 },
@@ -39,6 +84,8 @@ const failureLogs: StageLogSummary[] = canonicalStages.map((stage) => ({
   stage_name: stage.name,
   status: stage.status,
   summary: stage.name === "translation" ? "translation_failed" : stage.summary,
+  display_label: `${stage.name} 安全日志`,
+  safe_summary: stage.name === "translation" ? "翻译阶段失败：已隐藏本机路径。" : stage.summary,
   log_path: `/data/tasks/task-fixture123/logs/${stage.name}.log`,
 }));
 
@@ -81,13 +128,25 @@ function renderPage() {
 }
 
 function mockTask(status: TaskDetail["status"]): TaskDetail {
+  const stages =
+    status === "failed"
+      ? canonicalStages
+      : canonicalStages.map((stage) => ({
+          ...stage,
+          status: stage.name === "translation" ? status : stage.status === "failed" ? "pending" : stage.status,
+          failure_code: null,
+          recovery_actions: [],
+        }));
+
   return {
     task_id: "task-fixture123",
     source_url: "https://www.bilibili.com/video/BV1fixture123",
     normalized_source_url: "https://www.bilibili.com/video/BV1fixture123",
     source_video_id: "BV1fixture123",
     status,
-    stages: canonicalStages,
+    stages,
+    failure_code: status === "failed" ? "unknown_failure" : null,
+    recovery_actions: status === "failed" ? [retryAction("translation")] : [],
   };
 }
 
@@ -97,12 +156,21 @@ function mockTaskWithAsrMissingModelRecovery(): TaskDetailWithAsrMissingModelRec
     stages: [
       { name: "ingest", status: "success", summary: "Downloaded source video via bbdown", attempts: 1 },
       { name: "media_prep", status: "success", summary: "Prepared ffprobe metadata and ASR wav", attempts: 1 },
-      { name: "asr", status: "failed", summary: "missing_model", attempts: 1 },
+      {
+        name: "asr",
+        status: "failed",
+        summary: "missing_model",
+        failure_code: "asr_missing_model",
+        recovery_actions: [retryAction("asr", false)],
+        attempts: 1,
+      },
       { name: "translation", status: "pending", summary: null, attempts: 0 },
       { name: "highlight", status: "pending", summary: null, attempts: 0 },
       { name: "export", status: "pending", summary: null, attempts: 0 },
       { name: "report", status: "pending", summary: null, attempts: 0 },
     ],
+    failure_code: "asr_missing_model",
+    recovery_actions: [downloadModelAction(), retryAction("asr", false)],
     failure_recovery: {
       stage: "asr",
       kind: "missing_model",
@@ -175,6 +243,7 @@ function mockFailedTaskWithStaleExecutionProgress(): TaskDetail & {
 } {
   return {
     ...mockTask("failed"),
+    failure_code: "malformed_progress_event",
     stages: [
       { name: "ingest", status: "success", summary: "Downloaded source video via bbdown", attempts: 1 },
       { name: "media_prep", status: "success", summary: "Prepared ffprobe metadata and ASR wav", attempts: 1 },
@@ -208,26 +277,56 @@ describe("TaskDetailPage", () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     vi.mocked(downloadAsrModels).mockResolvedValue({ stage: "asr", kind: "missing_model", models: [] });
+    vi.mocked(retryTaskFromStage).mockResolvedValue({
+      task_id: "task-fixture123",
+      retry_stage: "translation",
+      status: "pending",
+    });
     vi.mocked(getTaskStages).mockResolvedValue(canonicalStages);
     vi.mocked(getTaskArtifacts).mockResolvedValue(artifacts);
     vi.mocked(getTaskLogs).mockResolvedValue(failureLogs);
   });
 
-  it("renders the canonical stage timeline, readable failure summary, and artifact overview", async () => {
+  it("renders retry action for generic failed stage and calls the backend retry endpoint", async () => {
     vi.mocked(getTaskDetail).mockResolvedValue(mockTask("failed"));
 
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "任务 task-fixture123" })).toBeInTheDocument();
-    const failurePanel = screen.getByText("可读失败摘要").closest(".panel");
+    const failurePanel = screen.getByRole("heading", { name: "处理失败" }).closest(".panel");
     expect(failurePanel).not.toBeNull();
-    expect(within(failurePanel as HTMLElement).getByRole("heading", { name: "翻译阶段失败" })).toBeInTheDocument();
-    expect(within(failurePanel as HTMLElement).getByText("翻译失败")).toBeInTheDocument();
-    expect(
-      screen.getByText("可从 翻译 重新尝试。上游已成功阶段保持不变，下游阶段继续等待。"),
-    ).toBeInTheDocument();
+    expect(within(failurePanel as HTMLElement).getByText("处理失败，请查看安全日志摘要后重试该阶段。"))
+      .toBeInTheDocument();
+    const retryButton = within(failurePanel as HTMLElement).getByRole("button", { name: "重试此阶段" });
+    fireEvent.click(retryButton);
+
+    await waitFor(() => {
+      expect(retryTaskFromStage).toHaveBeenCalledWith("task-fixture123", "translation");
+    });
+  });
+
+  it("renders the canonical stage timeline, safe log disclosure, and artifact overview", async () => {
+    vi.mocked(getTaskDetail).mockResolvedValue(mockTask("failed"));
+
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "任务 task-fixture123" })).toBeInTheDocument();
+    const failurePanel = screen.getByRole("heading", { name: "处理失败" }).closest(".panel");
+    expect(failurePanel).not.toBeNull();
+    expect(within(failurePanel as HTMLElement).getByText("处理失败，请查看安全日志摘要后重试该阶段。"))
+      .toBeInTheDocument();
     expect(screen.getByText("每 15 秒轮询")).toBeInTheDocument();
     expect(screen.getByText("Downloaded source video via bbdown")).toBeInTheDocument();
+    expect(screen.getByText("翻译阶段失败：已隐藏本机路径。")).toBeInTheDocument();
+    expect(screen.getByText("translation 安全日志")).toBeInTheDocument();
+    const logDetails = screen
+      .getAllByText("技术日志路径")
+      .map((label) => label.closest("details"))
+      .find((details): details is HTMLDetailsElement =>
+        Boolean(details?.textContent?.includes("translation.log")),
+      );
+    expect(logDetails).not.toBeNull();
+    expect(within(logDetails as HTMLElement).getByText("/data/tasks/task-fixture123/logs/translation.log")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "产物概览" })).toBeInTheDocument();
     expect(screen.getByText(/bilingual_transcript_json/i)).toBeInTheDocument();
 
@@ -250,7 +349,8 @@ describe("TaskDetailPage", () => {
     renderPage();
 
     expect(await screen.findByText("ASR 缺少 WhisperX 模型文件。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "自动下载缺失模型" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "ASR 模型缺失" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载缺失模型" })).toBeInTheDocument();
     expect(screen.getByText("/models/whisperx/whisperx")).toBeInTheDocument();
     expect(screen.getByText("/models/whisperx/alignment")).toBeInTheDocument();
   });
@@ -260,7 +360,7 @@ describe("TaskDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "自动下载缺失模型" }));
+    fireEvent.click(await screen.findByRole("button", { name: "下载缺失模型" }));
 
     await waitFor(() => {
       expect(downloadAsrModels).toHaveBeenCalledWith("task-fixture123", ["whisperx", "alignment"]);
@@ -324,9 +424,9 @@ describe("TaskDetailPage", () => {
     expect(screen.queryByRole("heading", { name: "ASR 执行进度" })).not.toBeInTheDocument();
     expect(screen.queryByText("stale progress should not render")).not.toBeInTheDocument();
 
-    const failurePanel = screen.getByText("可读失败摘要").closest(".panel");
+    const failurePanel = screen.getByRole("heading", { name: "处理失败" }).closest(".panel");
     expect(failurePanel).not.toBeNull();
-    expect(within(failurePanel as HTMLElement).getByRole("heading", { name: "语音转写阶段失败" }))
+    expect(within(failurePanel as HTMLElement).getByText("ASR 进度事件异常，当前执行已被标记为失败。"))
       .toBeInTheDocument();
   });
 
@@ -341,8 +441,18 @@ describe("TaskDetailPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "任务 task-fixture123" })).toBeInTheDocument();
-    expect(screen.getByText("已取消")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "任务已取消" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试此阶段" })).not.toBeInTheDocument();
     expect(getPollingInterval("cancelled")).toBe(15_000);
+  });
+
+  it("renders a not-found panel with a link back to new task", async () => {
+    vi.mocked(getTaskDetail).mockRejectedValue(new ApiError("Not found", 404));
+
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "任务不存在" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "返回新建任务" })).toHaveAttribute("href", "/");
   });
 
   it("uses a 15-second polling cadence after terminal task states", () => {

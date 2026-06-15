@@ -22,3 +22,17 @@
 - `web/src/lib/taskState.ts` centralizes state-matrix classification without parsing human summaries; retryability is based on enabled `retry_stage` recovery actions and their stage payload when present.
 - Vitest path filtering runs from the `web/` package cwd; `pnpm --dir web test --run ../web/src/lib/__tests__/api.test.ts ../web/src/lib/__tests__/taskState.test.ts` is the bounded equivalent of the plan's root-relative targeted test command.
 - Verification: targeted lib tests passed (28 tests) and `pnpm --dir web build` passed.
+
+## 2026-06-16 - Wave 3 workspace artifact states and export validation
+
+- `WorkspacePage` can consume optional `artifactReadiness` records directly, so T4 can wire task-detail readiness without changing workspace rendering internals.
+- Workspace artifact sections now classify query failures via `classifyArtifactReadiness("load_error")`; load errors render retry buttons and are not collapsed into empty data.
+- Export range validation is client-side and preserves edited input strings on both validation failures and backend export errors.
+- Verification: `pnpm --dir web test --run src/pages/__tests__/WorkspacePage.test.tsx` passed (6 tests).
+
+## 2026-06-16 - Wave 3 TaskDetail status recovery UI
+
+- `TaskDetailPage` now routes task-detail presentation through `classifyTaskState`, `getPrimaryAction`, and `isRetryable`; generic retry actions use the backend `retry_stage` contract instead of summary parsing.
+- Stage logs should prefer `display_label` and `safe_summary` in the timeline; raw `log_path` remains available only under the `技术日志路径` disclosure for operator diagnostics.
+- ASR missing-model recovery keeps the existing model-download endpoint but changes the primary action copy to `下载缺失模型` to match the recovery-action contract.
+- Verification: `pnpm --dir web test --run -- src/pages/__tests__/TaskDetailPage.test.tsx` passed (52 tests across the web Vitest suite because the command form runs all configured tests).

@@ -1,16 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 import {
+	ApiError,
 	downloadAsrModels,
 	getTaskArtifacts,
 	getTaskDetail,
 	getTaskLogs,
 	getTaskStages,
+	retryTaskFromStage,
 } from "../lib/api";
 import { GLOSSARY_TERMS } from "../lib/copy/glossary";
 import { TASK_DETAIL_COPY } from "../lib/copy/taskDetail";
+import {
+	classifyTaskState,
+	getPrimaryAction,
+	isRetryable,
+	type TaskState,
+} from "../lib/taskState";
 import {
 	type ArtifactRecord,
 	type AsrExecutionPhaseName,
@@ -23,7 +31,10 @@ import {
 	isTerminalStatus,
 	type StageLogSummary,
 	safeParseMetadata,
+	type TaskDetail,
 	type TaskExecutionProgress,
+	type TaskFailureCode,
+	type TaskStageName,
 	type TaskStageRecord,
 	type TaskStatus,
 } from "../lib/types";
@@ -34,6 +45,7 @@ interface StageRow {
 	status: TaskStatus;
 	attempts: number;
 	summary: string;
+	displayLabel: string | null;
 	logPath: string | null;
 }
 
@@ -156,7 +168,11 @@ function buildStageRows(
 				? buildAsrStageSummary(options.taskStatus, options.executionProgress)
 				: null;
 		const rawSummary =
-			progressSummary ?? log?.summary ?? stage?.summary ?? null;
+			progressSummary ??
+			log?.safe_summary ??
+			log?.summary ??
+			stage?.summary ??
+			null;
 		const status =
 			stageName === "asr" &&
 			stage?.status === "running" &&
@@ -169,9 +185,57 @@ function buildStageRows(
 			status,
 			attempts: stage?.attempts ?? 0,
 			summary: humanizeSummary(rawSummary),
+			displayLabel: log?.display_label ?? null,
 			logPath: log?.log_path ?? null,
 		};
 	});
+}
+
+function findFailedStage(task: TaskDetail): TaskStageRecord | null {
+	return task.stages.find((stage) => stage.status === "failed") ?? null;
+}
+
+function getTaskFailureCode(
+	task: TaskDetail,
+	failedStage: TaskStageRecord | null,
+): TaskFailureCode | null {
+	return task.failure_code ?? failedStage?.failure_code ?? null;
+}
+
+function getFailureSummary(
+	task: TaskDetail,
+	failedStage: TaskStageRecord | null,
+): string {
+	const failureCode = getTaskFailureCode(task, failedStage);
+	if (failureCode && TASK_DETAIL_COPY.failure.fallbackMessages[failureCode]) {
+		return TASK_DETAIL_COPY.failure.fallbackMessages[failureCode];
+	}
+
+	return humanizeSummary(failedStage?.summary ?? task.failure_code ?? null);
+}
+
+function getPanelTone(state: TaskState): string {
+	if (
+		state === "failed_retryable" ||
+		state === "failed_asr_missing_model" ||
+		state === "failed_terminal" ||
+		state === "artifact_failed" ||
+		state === "worker_stale_recovery"
+	) {
+		return "panel panel--danger task-state-panel";
+	}
+
+	if (state === "cancelled") {
+		return "panel panel--muted task-state-panel";
+	}
+
+	return "panel task-state-panel";
+}
+
+function getActionCopy(
+	actionId: "retry_stage" | "download_asr_model" | "view_logs",
+) {
+	return TASK_DETAIL_COPY.failure.actions[actionId];
 }
 
 function formatArtifactName(path: string): string {
@@ -328,6 +392,178 @@ function AsrExecutionProgressPanel({
 	);
 }
 
+function TaskStatePanel({
+	task,
+	state,
+	failedStage,
+	asrMissingModelRecovery,
+	onRetry,
+	onDownloadModels,
+	retryPending,
+	downloadPending,
+	retryErrorMessage,
+	downloadErrorMessage,
+	downloadDisabled,
+}: {
+	task: TaskDetail;
+	state: TaskState;
+	failedStage: TaskStageRecord | null;
+	asrMissingModelRecovery: AsrMissingModelRecovery | null;
+	onRetry: (stageName: TaskStageName) => void;
+	onDownloadModels: () => void;
+	retryPending: boolean;
+	downloadPending: boolean;
+	retryErrorMessage: string | null;
+	downloadErrorMessage: string | null;
+	downloadDisabled: boolean;
+}) {
+	const primaryAction = getPrimaryAction(state);
+	const failureSummary = getFailureSummary(task, failedStage);
+	const failedStageLabel = failedStage
+		? formatStageLabel(failedStage.name)
+		: null;
+	const canRetry = Boolean(
+		failedStage &&
+			isRetryable(task, failedStage.name) &&
+			primaryAction === "retry_stage",
+	);
+
+	if (state === "queued" || state === "retry_in_progress") {
+		return (
+			<section className={getPanelTone(state)} aria-live="polite">
+				<p className="eyebrow">{TASK_DETAIL_COPY.statePanels.queued.eyebrow}</p>
+				<h3>{TASK_DETAIL_COPY.statePanels.queued.title}</h3>
+				<p>{TASK_DETAIL_COPY.statePanels.queued.description}</p>
+			</section>
+		);
+	}
+
+	if (state === "active" || state === "force_kill_requested") {
+		return (
+			<section className={getPanelTone(state)} aria-live="polite">
+				<div className="panel__header">
+					<div>
+						<p className="eyebrow">
+							{TASK_DETAIL_COPY.statePanels.active.eyebrow}
+						</p>
+						<h3>{TASK_DETAIL_COPY.statePanels.active.title}</h3>
+					</div>
+					<span className={getStatusTone(task.status)}>
+						{formatTaskStatusLabel(task.status)}
+					</span>
+				</div>
+				<p>{TASK_DETAIL_COPY.statePanels.active.description}</p>
+				<button className="secondary-button" disabled type="button">
+					{TASK_DETAIL_COPY.statePanels.active.cancelAction}
+				</button>
+				<p className="support-copy">
+					{TASK_DETAIL_COPY.statePanels.active.cancelUnavailable}
+				</p>
+			</section>
+		);
+	}
+
+	if (state === "failed_asr_missing_model") {
+		return (
+			<section className={getPanelTone(state)} aria-live="polite">
+				<p className="eyebrow">
+					{TASK_DETAIL_COPY.statePanels.asrMissingModel.eyebrow}
+				</p>
+				<h3>{TASK_DETAIL_COPY.statePanels.asrMissingModel.title}</h3>
+				<p>{asrMissingModelRecovery?.message ?? failureSummary}</p>
+				{asrMissingModelRecovery ? (
+					<>
+						<p className="support-copy">
+							{TASK_DETAIL_COPY.failure.missingModel.manualHint}
+						</p>
+						<dl className="metadata-list">
+							{asrMissingModelRecovery.models.map((model) => (
+								<div className="metadata-list__row" key={model.key}>
+									<dt>{model.label}</dt>
+									<dd>{model.target_dir}</dd>
+								</div>
+							))}
+						</dl>
+					</>
+				) : null}
+				<button
+					className="primary-button"
+					disabled={downloadDisabled || downloadPending}
+					onClick={onDownloadModels}
+					type="button"
+				>
+					{downloadPending
+						? TASK_DETAIL_COPY.failure.missingModel.downloadPending
+						: getActionCopy("download_asr_model").label}
+				</button>
+				{downloadErrorMessage ? (
+					<p className="form-error">{downloadErrorMessage}</p>
+				) : null}
+			</section>
+		);
+	}
+
+	if (
+		state === "failed_retryable" ||
+		state === "failed_terminal" ||
+		state === "worker_stale_recovery" ||
+		state === "artifact_failed" ||
+		state === "artifact_missing"
+	) {
+		return (
+			<section className={getPanelTone(state)} aria-live="polite">
+				<p className="eyebrow">{TASK_DETAIL_COPY.statePanels.failed.eyebrow}</p>
+				<h3>{TASK_DETAIL_COPY.statePanels.failed.title}</h3>
+				<p>{failureSummary}</p>
+				{failedStageLabel ? (
+					<p>{TASK_DETAIL_COPY.failure.recovery(failedStageLabel)}</p>
+				) : null}
+				{canRetry && failedStage ? (
+					<button
+						className="primary-button"
+						disabled={retryPending}
+						onClick={() => onRetry(failedStage.name)}
+						type="button"
+					>
+						{retryPending
+							? TASK_DETAIL_COPY.statePanels.failed.retryPending
+							: getActionCopy("retry_stage").label}
+					</button>
+				) : null}
+				{retryErrorMessage ? (
+					<p className="form-error">{retryErrorMessage}</p>
+				) : null}
+			</section>
+		);
+	}
+
+	if (state === "cancelled") {
+		return (
+			<section className={getPanelTone(state)} aria-live="polite">
+				<p className="eyebrow">
+					{TASK_DETAIL_COPY.statePanels.cancelled.eyebrow}
+				</p>
+				<h3>{TASK_DETAIL_COPY.statePanels.cancelled.title}</h3>
+				<p>{TASK_DETAIL_COPY.statePanels.cancelled.description}</p>
+			</section>
+		);
+	}
+
+	if (state === "success") {
+		return (
+			<section className={getPanelTone(state)} aria-live="polite">
+				<p className="eyebrow">
+					{TASK_DETAIL_COPY.statePanels.success.eyebrow}
+				</p>
+				<h3>{TASK_DETAIL_COPY.statePanels.success.title}</h3>
+				<p>{TASK_DETAIL_COPY.statePanels.success.description}</p>
+			</section>
+		);
+	}
+
+	return null;
+}
+
 export function TaskDetailPage() {
 	const params = useParams();
 	const taskId = params.taskId ?? "";
@@ -342,6 +578,7 @@ export function TaskDetailPage() {
 
 	const taskStatus = taskDetailQuery.data?.status;
 	const executionProgress = taskDetailQuery.data?.execution_progress;
+	const taskState = classifyTaskState(taskDetailQuery.data);
 
 	const stageQuery = useQuery({
 		queryKey: ["task", taskId, "stages"],
@@ -365,7 +602,7 @@ export function TaskDetailPage() {
 	});
 
 	const stages = taskDetailQuery.data?.stages ?? stageQuery.data ?? [];
-	const logs = logsQuery.data ?? [];
+	const logs = taskDetailQuery.data?.log_records ?? logsQuery.data ?? [];
 	const artifacts = artifactsQuery.data ?? [];
 
 	const stageRows = useMemo(
@@ -377,8 +614,9 @@ export function TaskDetailPage() {
 		[executionProgress, logs, stages, taskStatus],
 	);
 	const isActiveAsr = isAsrStageActive(stages, taskStatus);
-	const failedStage =
-		stageRows.find((stage) => stage.status === "failed") ?? null;
+	const failedStage = taskDetailQuery.data
+		? findFailedStage(taskDetailQuery.data)
+		: null;
 	const failureRecovery = taskDetailQuery.data?.failure_recovery;
 	const asrMissingModelRecovery: AsrMissingModelRecovery | null =
 		failedStage?.name === "asr" &&
@@ -390,6 +628,24 @@ export function TaskDetailPage() {
 		asrMissingModelRecovery?.models
 			.filter((model) => model.download_supported && model.status === "missing")
 			.map((model) => model.key) ?? [];
+
+	const retryStageMutation = useMutation({
+		mutationFn: (stageName: TaskStageName) =>
+			retryTaskFromStage(taskId, stageName),
+		onSuccess: async () => {
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: ["task", taskId, "detail"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["task", taskId, "stages"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["task", taskId, "logs"],
+				}),
+			]);
+		},
+	});
 
 	const downloadAsrModelsMutation = useMutation({
 		mutationFn: () => downloadAsrModels(taskId, downloadableModelKeys),
@@ -414,6 +670,25 @@ export function TaskDetailPage() {
 				<div className="panel panel--loading">
 					<p className="eyebrow">{TASK_DETAIL_COPY.loading.eyebrow}</p>
 					<h2>{TASK_DETAIL_COPY.loading.title}</h2>
+				</div>
+			</section>
+		);
+	}
+
+	if (
+		taskDetailQuery.isError &&
+		taskDetailQuery.error instanceof ApiError &&
+		taskDetailQuery.error.status === 404
+	) {
+		return (
+			<section className="page">
+				<div className="panel panel--danger task-state-panel">
+					<p className="eyebrow">{TASK_DETAIL_COPY.notFound.eyebrow}</p>
+					<h2>{TASK_DETAIL_COPY.notFound.title}</h2>
+					<p>{TASK_DETAIL_COPY.notFound.description}</p>
+					<Link className="primary-button" to="/">
+						{TASK_DETAIL_COPY.notFound.action}
+					</Link>
 				</div>
 			</section>
 		);
@@ -457,62 +732,35 @@ export function TaskDetailPage() {
 				</div>
 			</div>
 
-			{failedStage ? (
-				<div className="panel panel--danger">
-					<p className="eyebrow">{TASK_DETAIL_COPY.failure.eyebrow}</p>
-					<h3>
-						{TASK_DETAIL_COPY.failure.title(formatStageLabel(failedStage.name))}
-					</h3>
-					<p>{failedStage.summary}</p>
-					<p>
-						{TASK_DETAIL_COPY.failure.recovery(
-							formatStageLabel(failedStage.name),
-						)}
-					</p>
-					{asrMissingModelRecovery ? (
-						<>
-							<p className="eyebrow">
-								{TASK_DETAIL_COPY.failure.missingModel.eyebrow}
-							</p>
-							<h4>{TASK_DETAIL_COPY.failure.missingModel.title}</h4>
-							<p>{asrMissingModelRecovery.message}</p>
-							<p className="support-copy">
-								{TASK_DETAIL_COPY.failure.missingModel.manualHint}
-							</p>
-							<dl className="metadata-list">
-								{asrMissingModelRecovery.models.map((model) => (
-									<div className="metadata-list__row" key={model.key}>
-										<dt>{model.label}</dt>
-										<dd>{model.target_dir}</dd>
-									</div>
-								))}
-							</dl>
-							<button
-								className="primary-button"
-								disabled={
-									downloadableModelKeys.length === 0 ||
-									downloadAsrModelsMutation.isPending
-								}
-								onClick={() => {
-									void downloadAsrModelsMutation.mutateAsync();
-								}}
-								type="button"
-							>
-								{downloadAsrModelsMutation.isPending
-									? TASK_DETAIL_COPY.failure.missingModel.downloadPending
-									: TASK_DETAIL_COPY.failure.missingModel.downloadIdle}
-							</button>
-							{downloadAsrModelsMutation.isError ? (
-								<p className="form-error">
-									{downloadAsrModelsMutation.error instanceof Error
-										? downloadAsrModelsMutation.error.message
-										: asrMissingModelRecovery.message}
-								</p>
-							) : null}
-						</>
-					) : null}
-				</div>
-			) : null}
+			<TaskStatePanel
+				asrMissingModelRecovery={asrMissingModelRecovery}
+				downloadDisabled={downloadableModelKeys.length === 0}
+				downloadErrorMessage={
+					downloadAsrModelsMutation.isError
+						? downloadAsrModelsMutation.error instanceof Error
+							? downloadAsrModelsMutation.error.message
+							: (asrMissingModelRecovery?.message ?? null)
+						: null
+				}
+				downloadPending={downloadAsrModelsMutation.isPending}
+				failedStage={failedStage}
+				onDownloadModels={() => {
+					void downloadAsrModelsMutation.mutateAsync();
+				}}
+				onRetry={(stageName) => {
+					void retryStageMutation.mutateAsync(stageName);
+				}}
+				retryErrorMessage={
+					retryStageMutation.isError
+						? retryStageMutation.error instanceof Error
+							? retryStageMutation.error.message
+							: TASK_DETAIL_COPY.failure.retryErrorFallback
+						: null
+				}
+				retryPending={retryStageMutation.isPending}
+				state={taskState}
+				task={taskDetailQuery.data}
+			/>
 
 			{isActiveAsr && executionProgress?.stage_name === "asr" ? (
 				<AsrExecutionProgressPanel
@@ -554,12 +802,18 @@ export function TaskDetailPage() {
 									<span>
 										{TASK_DETAIL_COPY.timeline.attempts(stage.attempts)}
 									</span>
-									{stage.logPath ? (
-										<span>{stage.logPath}</span>
-									) : (
-										<span>{TASK_DETAIL_COPY.timeline.noStageLog}</span>
-									)}
+									<span>
+										{stage.displayLabel ?? TASK_DETAIL_COPY.timeline.noStageLog}
+									</span>
 								</div>
+								{stage.logPath ? (
+									<details className="log-path-disclosure">
+										<summary>
+											{TASK_DETAIL_COPY.timeline.technicalLogPath}
+										</summary>
+										<code>{stage.logPath}</code>
+									</details>
+								) : null}
 							</li>
 						))}
 					</ol>

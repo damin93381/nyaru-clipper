@@ -51,6 +51,8 @@ export const WORKSPACE_COPY = {
 		empty: "排名后的高光候选 JSON 产物可用后，会在这里显示详细信息。",
 		exportFailed: "片段导出失败。",
 		missingCandidateId: "候选片段缺少可导出的 candidate_id。",
+		invalidNegativeRange: "时间不能小于 0 秒",
+		invalidRangeOrder: "开始时间必须早于结束时间",
 	},
   downloads: {
     eyebrow: GLOSSARY_TERMS.downloads,
@@ -64,6 +66,15 @@ export const WORKSPACE_COPY = {
       missing: "产物缺失",
       failed: "生成失败",
       load_error: "加载失败",
+    },
+    messages: {
+      loading: "正在加载工作台数据",
+      not_ready: "该数据尚未生成",
+      missing: "产物缺失，可重试生成阶段",
+      failed: "生成阶段失败，请查看恢复操作",
+      load_error: "加载工作台数据失败",
+      empty: "暂无数据",
+      retrySection: "重新加载此区域",
     },
     descriptions: {
       ready: "该数据已可用于工作区。",

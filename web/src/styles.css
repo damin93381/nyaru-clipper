@@ -21,6 +21,7 @@
   --surface-elevated: #111a2e;
   --surface-muted: #1a2640;
   --surface-danger: #2d1820;
+  --surface-success: #12281d;
   --border-subtle: #223252;
   --border-strong: #34507f;
   --text-primary: #f5f7fb;
@@ -144,6 +145,7 @@ input {
 .pill,
 .status-badge,
 .primary-button,
+.secondary-button,
 .toggle-card,
 .field__input {
   border-radius: var(--radius-md);
@@ -187,7 +189,8 @@ input {
 }
 
 .panel--loading,
-.panel--danger {
+.panel--danger,
+.panel--muted {
   background: linear-gradient(180deg, rgba(17, 26, 46, 0.95), rgba(17, 26, 46, 0.8));
 }
 
@@ -196,10 +199,16 @@ input {
   background: rgba(45, 24, 32, 0.94);
 }
 
+.panel--muted {
+  border-color: rgba(142, 161, 197, 0.35);
+  background: rgba(26, 38, 64, 0.82);
+}
+
 .reserved-panel,
 .page-hero,
 .task-form,
 .task-summary,
+.task-state-panel,
 .artifact-card,
 .stage-card {
   display: grid;
@@ -295,22 +304,37 @@ input {
 
 .field__input:focus-visible,
 .primary-button:focus-visible,
+.secondary-button:focus-visible,
+.log-path-disclosure summary:focus-visible,
 .nav-link:focus-visible {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
 
-.primary-button {
+.primary-button,
+.secondary-button {
   border: 1px solid rgba(125, 211, 252, 0.45);
-  background: linear-gradient(180deg, rgba(125, 211, 252, 0.25), rgba(96, 165, 250, 0.25));
   color: var(--text-primary);
   padding: var(--space-3) var(--space-5);
   justify-self: start;
   cursor: pointer;
 }
 
-.primary-button:disabled {
+.primary-button {
+  background: linear-gradient(180deg, rgba(125, 211, 252, 0.25), rgba(96, 165, 250, 0.25));
+}
+
+.secondary-button {
+  background: rgba(26, 38, 64, 0.7);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
   opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.primary-button:disabled:not(a) {
   cursor: progress;
 }
 
@@ -330,6 +354,7 @@ input {
 .status-badge--pending,
 .status-badge--running,
 .status-badge--cancel_requested,
+.status-badge--cancelled,
 .status-badge--success,
 .status-badge--failed,
 .status-badge--skipped {
@@ -347,6 +372,10 @@ input {
 
 .status-badge--cancel_requested {
   color: var(--accent-warning);
+}
+
+.status-badge--cancelled {
+  color: var(--text-muted);
 }
 
 .status-badge--warning {
@@ -534,6 +563,34 @@ input {
   background: rgba(26, 38, 64, 0.56);
 }
 
+.workspace-state-card {
+  gap: var(--space-3);
+}
+
+.workspace-state-card p,
+.field__error {
+  margin: 0;
+}
+
+.workspace-state-card--load_error,
+.workspace-state-card--missing,
+.workspace-state-card--failed {
+  border-color: var(--accent-danger);
+}
+
+.workspace-state-card--loading,
+.workspace-state-card--not_ready {
+  border-color: var(--accent-warning);
+}
+
+.workspace-state-card--empty {
+  border-color: var(--border-subtle);
+}
+
+.field__error {
+  color: var(--accent-danger);
+}
+
 .workspace-downloads {
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
 }
@@ -565,6 +622,27 @@ input {
 .metadata-list dt,
 .metadata-list dd {
   margin: 0;
+}
+
+.log-path-disclosure {
+  color: var(--text-secondary);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.log-path-disclosure summary {
+  color: var(--accent-primary);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.log-path-disclosure code {
+  display: block;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(9, 14, 24, 0.8);
+  padding: var(--space-3);
 }
 
 @media (max-width: 1120px) {
