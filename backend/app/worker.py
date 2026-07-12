@@ -22,6 +22,7 @@ from app.services.task_control import (
     clear_execution_control,
 )
 from app.services.task_runner import run_task_pipeline
+from app.services.workstation_events import publish_stage_updated, publish_task_updated
 from app.services.workstation_queue import begin_queue_mutation, claim_next_queue_entry, finish_queue_entry
 from app.services.workstation_runs import finish_pipeline_run, get_active_pipeline_run, get_pending_pipeline_run, start_pipeline_run, sync_stage_run
 
@@ -110,6 +111,7 @@ def _mark_job_stale_failed(session, job: TaskJob) -> None:
         task.status = "failed"
         task.updated_at = now
         session.add(task)
+        publish_task_updated(session, task)
 
     if stage is not None:
         stage.status = "failed"
@@ -118,6 +120,7 @@ def _mark_job_stale_failed(session, job: TaskJob) -> None:
         stage.finished_at = now
         stage.updated_at = now
         session.add(stage)
+        publish_stage_updated(session, stage)
         append_stage_log(log_file_for_stage(job.task_id, job.stage_name), "worker:recovered stale running job")
         if active_run is not None:
             start_pipeline_run(session, active_run)
@@ -189,6 +192,8 @@ def claim_next_job() -> ClaimedJob | None:
         session.add(job)
         session.add(task)
         session.add(stage)
+        publish_task_updated(session, task)
+        publish_stage_updated(session, stage)
         return ClaimedJob(task_id=job.task_id, stage_name=job.stage_name)
 
 
@@ -212,6 +217,7 @@ def complete_job(task_id: str, *, success: bool) -> None:
         task.updated_at = now
         session.add(job)
         session.add(task)
+        publish_task_updated(session, task)
 
         if stage is not None:
             stage.status = "success" if success else "failed"
@@ -219,6 +225,7 @@ def complete_job(task_id: str, *, success: bool) -> None:
             stage.summary = "Completed by worker" if success else "Worker execution failed"
             stage.updated_at = now
             session.add(stage)
+            publish_stage_updated(session, stage)
         pending_run = get_pending_pipeline_run(session, task_id)
         if pending_run is not None:
             start_pipeline_run(session, pending_run)

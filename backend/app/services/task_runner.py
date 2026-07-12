@@ -43,6 +43,7 @@ from app.services.workstation_runs import (
     start_pipeline_run,
     sync_stage_run,
 )
+from app.services.workstation_events import publish_stage_updated, publish_task_updated
 
 CANONICAL_STAGE_ORDER = CANONICAL_STAGES
 
@@ -341,6 +342,8 @@ def run_task_pipeline(
                     session.add(task)
                     session.add(job)
                     session.add(stage)
+                    publish_task_updated(session, task)
+                    publish_stage_updated(session, stage)
                     sync_stage_run(session, pipeline_run.id, stage)
                     session.commit()
                     stages = _load_stage_map(session, task_id)
@@ -368,6 +371,8 @@ def run_task_pipeline(
                     session.add(task)
                     session.add(job)
                     session.add(stage)
+                    publish_task_updated(session, task)
+                    publish_stage_updated(session, stage)
                     sync_stage_run(session, pipeline_run.id, stage)
                     finish_pipeline_run(session, pipeline_run, "failed")
                     session.commit()
@@ -394,6 +399,8 @@ def run_task_pipeline(
                 session.add(task)
                 session.add(job)
                 session.add(stage)
+                publish_task_updated(session, task)
+                publish_stage_updated(session, stage)
                 sync_stage_run(session, pipeline_run.id, stage)
                 session.commit()
                 append_stage_log(log_path, f"task_runner:complete stage={stage_name} status={stage.status}")
@@ -410,6 +417,7 @@ def run_task_pipeline(
                 task.updated_at = job.finished_at
                 session.add(job)
                 session.add(task)
+                publish_task_updated(session, task)
                 finish_pipeline_run(session, pipeline_run, "success")
                 session.commit()
         except StaleExecutionTokenError:

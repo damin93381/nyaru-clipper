@@ -27,6 +27,7 @@ from app.services.task_library_lifecycle import (
     apply_task_bulk_mutation,
     patch_task_metadata,
 )
+from app.services.workstation_events import publish_event
 from app.services.workstation_queue import begin_queue_mutation, enqueue_task
 from app.services.workstation_runs import create_pipeline_run
 
@@ -220,6 +221,7 @@ def _create_workstation_task(session: Session, payload: CreateWorkstationTaskReq
     queue_entry = enqueue_task(session, task_id)
     queue_entry.priority = payload.priority
     session.add(queue_entry)
+    publish_event(session, "task.created", task_id, {"task_id": task_id, "status": task.status})
     session.flush()
     return task
 

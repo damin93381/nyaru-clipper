@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+import json
 
 import anyio
 import pytest
@@ -156,3 +157,140 @@ def test_events_endpoint_declares_sse_response() -> None:
     assert response.media_type == "text/event-stream"
     assert response.headers["cache-control"] == "no-cache"
     assert response.headers["x-accel-buffering"] == "no"
+
+
+def test_v2_task_creation_stages_a_public_created_event(database) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.models import WorkstationEvent
+
+    # Given: a valid v2 Bilibili creation request.
+    payload = {
+        "source": {"kind": "bilibili", "url": "https://www.bilibili.com/video/BV1eventv2001"},
+        "profile_id": "standard",
+        "priority": 0,
+    }
+
+    # When: the v2 creation route commits its task transaction.
+    with TestClient(app) as client:
+        response = client.post("/api/v2/tasks", json=payload)
+    task_id = response.json()["task_id"]
+
+    # Then: SSE consumers receive only the new task's public lifecycle projection.
+    with Session(database) as session:
+        event = session.exec(select(WorkstationEvent).where(WorkstationEvent.event_type == "task.created")).one()
+    assert response.status_code == 201
+    assert json.loads(event.payload_json) == {"task_id": task_id, "status": "pending"}
+
+
+def test_task_runner_stages_public_task_and_stage_events_at_stage_checkpoints(database, monkeypatch) -> None:
+    from app.models import WorkstationEvent
+    from app.repositories.tasks import create_task
+    import app.services.task_runner as task_runner
+
+    # Given: a pending task whose stage executors complete without external dependencies.
+    with Session(database) as session:
+        created, was_created = create_task(session, "https://www.bilibili.com/video/BV1eventrunner001")
+        task_id = created["task_id"]
+        session.commit()
+    assert was_created is True
+    monkeypatch.setattr(
+        task_runner,
+        "STAGE_EXECUTORS",
+        {stage_name: lambda _session, _task_id: None for stage_name in task_runner.CANONICAL_STAGE_ORDER},
+    )
+
+    # When: the normal runner commits each stage checkpoint.
+    with Session(database) as session:
+        task_runner.run_task_pipeline(session, task_id)
+
+    # Then: every completed stage and the terminal task state are replayable public events.
+    with Session(database) as session:
+        events = session.exec(select(WorkstationEvent).order_by(WorkstationEvent.id)).all()
+    payloads_by_type = [(event.event_type, json.loads(event.payload_json)) for event in events]
+    assert ("task.updated", {"task_id": task_id, "status": "success"}) in payloads_by_type
+    for stage_name in task_runner.CANONICAL_STAGE_ORDER:
+        assert any(
+            event_type == "stage.updated"
+            and payload["task_id"] == task_id
+            and payload["stage_name"] == stage_name
+            and payload["status"] == "success"
+            for event_type, payload in payloads_by_type
+        )
+
+
+def test_worker_claim_and_completion_stage_public_task_and_stage_events(database) -> None:
+    from app.models import WorkstationEvent
+    from app.repositories.tasks import create_task
+    from app.worker import claim_next_job, complete_job
+
+    # Given: one pending queue entry.
+    with Session(database) as session:
+        created, was_created = create_task(session, "https://www.bilibili.com/video/BV1eventworker001")
+        task_id = created["task_id"]
+        session.commit()
+    assert was_created is True
+
+    # When: the worker claims and then completes that task directly.
+    claimed = claim_next_job()
+    assert claimed is not None
+    complete_job(task_id, success=True)
+
+    # Then: both direct transitions have public task and stage projections.
+    with Session(database) as session:
+        events = session.exec(select(WorkstationEvent).order_by(WorkstationEvent.id)).all()
+    payloads_by_type = [(event.event_type, json.loads(event.payload_json)) for event in events]
+    assert ("task.updated", {"task_id": task_id, "status": "running"}) in payloads_by_type
+    assert ("task.updated", {"task_id": task_id, "status": "success"}) in payloads_by_type
+    assert any(
+        event_type == "stage.updated"
+        and payload["task_id"] == task_id
+        and payload["status"] == "running"
+        for event_type, payload in payloads_by_type
+    )
+    assert any(
+        event_type == "stage.updated"
+        and payload["task_id"] == task_id
+        and payload["status"] == "success"
+        for event_type, payload in payloads_by_type
+    )
+
+
+def test_event_replay_reads_bounded_ordered_pages(database, monkeypatch) -> None:
+    from sqlalchemy import event as sqlalchemy_event
+
+    from app.services import workstation_events
+    from app.services.workstation_events import iter_events, publish_event
+
+    # Given: more committed events than one configured replay page.
+    monkeypatch.setattr(workstation_events, "_EVENT_PAGE_SIZE", 2)
+    with Session(database) as session:
+        for index in range(5):
+            publish_event(
+                session,
+                "task.updated",
+                f"task-{index}",
+                {"task_id": f"task-{index}", "status": "running"},
+            )
+        session.commit()
+
+    # When: a client consumes the complete replay.
+    replay_queries: list[str] = []
+
+    def record_query(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+        if "FROM workstationevent" in statement:
+            replay_queries.append(statement)
+
+    sqlalchemy_event.listen(database, "before_cursor_execute", record_query)
+    try:
+        frames = anyio.run(_read_frames, iter_events(None, heartbeat_seconds=15), 5)
+    finally:
+        sqlalchemy_event.remove(database, "before_cursor_execute", record_query)
+
+    # Then: the stream drains ordered pages without duplicates or an unbounded first query.
+    ids = [int(frame.splitlines()[0].removeprefix("id: ")) for frame in frames]
+    assert ids == sorted(ids)
+    assert len(set(ids)) == 5
+    assert len(replay_queries) == 3
+    assert all("LIMIT" in statement for statement in replay_queries)

@@ -13,9 +13,10 @@ from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from app.db import get_engine
-from app.models import WorkstationEvent, utc_now
+from app.models import Task, TaskStage, WorkstationEvent, utc_now
 
 _POLL_INTERVAL_SECONDS = 0.5
+_EVENT_PAGE_SIZE = 100
 _EVENT_RETENTION = timedelta(days=7)
 _EVENT_RETENTION_COUNT = 10_000
 
@@ -38,6 +39,32 @@ def publish_event(
     return event
 
 
+def publish_task_updated(session: Session, task: Task) -> WorkstationEvent:
+    """Stage the public task lifecycle projection with its task mutation."""
+    return publish_event(
+        session,
+        "task.updated",
+        task.id,
+        {"task_id": task.id, "status": task.status},
+    )
+
+
+def publish_stage_updated(session: Session, stage: TaskStage) -> WorkstationEvent:
+    """Stage the public stage lifecycle projection with its stage mutation."""
+    return publish_event(
+        session,
+        "stage.updated",
+        stage.task_id,
+        {
+            "task_id": stage.task_id,
+            "stage_name": stage.name,
+            "status": stage.status,
+            "failure_code": stage.failure_code,
+            "attempts": stage.attempts,
+        },
+    )
+
+
 async def iter_events(last_event_id: int | None, heartbeat_seconds: float) -> AsyncIterator[str]:
     """Replay committed events, then poll with short-lived sessions until disconnected."""
     cursor = last_event_id or 0
@@ -49,15 +76,19 @@ async def iter_events(last_event_id: int | None, heartbeat_seconds: float) -> As
                 select(WorkstationEvent)
                 .where(WorkstationEvent.id > cursor)
                 .order_by(WorkstationEvent.id)
+                .limit(_EVENT_PAGE_SIZE)
             ).all()
+            frames = [
+                (event.id, _serialize_event_frame(event))
+                for event in events
+                if event.id is not None
+            ]
 
-        if events:
-            for event in events:
-                if event.id is None:
-                    continue
-                cursor = event.id
+        if frames:
+            for event_id, frame in frames:
+                cursor = event_id
                 last_activity = time.monotonic()
-                yield _serialize_event_frame(event)
+                yield frame
             continue
 
         if time.monotonic() - last_activity >= heartbeat_seconds:
