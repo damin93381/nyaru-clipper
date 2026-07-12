@@ -45,6 +45,10 @@ from app.services.storage import build_artifact_content_path, summarize_stage_lo
 
 MAX_PAGE_SIZE: Final = 100
 _LIKE_ESCAPE: Final = "\\"
+_FILE_URI_IN_TEXT: Final = re.compile(
+    r"file://(?:[^\s/\"'<>()[\]{}.,;!?]+)?/[^\s\"'<>()[\]{},;!?]+",
+    re.IGNORECASE,
+)
 _HOST_PATH_IN_TEXT: Final = re.compile(
     r"(?<![:/\w])(?:/(?:[^\s\"'<>()[\]{},;!?]+)|[A-Za-z]:[\\/](?:[^\s\"'<>()[\]{},;!?]+)|\\\\(?:[^\s\"'<>()[\]{},;!?]+))"
 )
@@ -465,7 +469,13 @@ def _sanitize_visible_text(value: str | None) -> str | None:
     """Redact cross-platform absolute host paths while preserving surrounding diagnostics."""
     if value is None:
         return None
-    return _HOST_PATH_IN_TEXT.sub("[path]", value)
+    normalized_file_uris = _FILE_URI_IN_TEXT.sub(_normalize_file_uri, value)
+    return _HOST_PATH_IN_TEXT.sub("[path]", normalized_file_uris)
+
+
+def _normalize_file_uri(match: re.Match[str]) -> str:
+    """Replace a file URI with its decoded basename without retaining its host path."""
+    return _local_source_basename(match.group()) or "[path]"
 
 
 def _recovery_actions(

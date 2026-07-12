@@ -477,10 +477,15 @@ def test_workstation_source_labels_normalize_file_uri_display_names(session: Ses
     from app.repositories.workstation import get_workstation_task_overview, list_workstation_tasks
 
     display_names = {
-        "task-display-uri": "file:///home/operator/capture.mp4",
-        "task-display-encoded-uri": "file:///home/operator/capture%20copy.mp4",
+        "task-display-uri": ("file:///home/operator/capture.mp4", "capture.mp4"),
+        "task-display-encoded-uri": ("file:///home/operator/capture%20copy.mp4", "capture copy.mp4"),
+        "task-display-embedded-uri": ("Imported file:///home/operator/capture.mp4", "Imported capture.mp4"),
+        "task-display-embedded-encoded-uri": (
+            "Imported file:///home/operator/capture%20copy.mp4",
+            "Imported capture copy.mp4",
+        ),
     }
-    for task_id, display_name in display_names.items():
+    for task_id, (display_name, _) in display_names.items():
         session.add(
             Task(
                 id=task_id,
@@ -501,14 +506,13 @@ def test_workstation_source_labels_normalize_file_uri_display_names(session: Ses
 
     # When: file-URI display names are projected through the v2 list and overview.
     page = list_workstation_tasks(session, TaskListQuery(page_size=50))
-    overview = get_workstation_task_overview(session, "task-display-uri")
+    overview = get_workstation_task_overview(session, "task-display-embedded-uri")
 
     # Then: filenames remain useful without exposing either URI or its host path.
     labels = {item.task_id: item.source_label for item in page.items}
-    assert labels["task-display-uri"] == "capture.mp4"
-    assert labels["task-display-encoded-uri"] == "capture copy.mp4"
+    assert labels == {task_id: expected_label for task_id, (_, expected_label) in display_names.items()}
     assert overview is not None
-    assert overview.source_label == "capture.mp4"
+    assert overview.source_label == "Imported capture.mp4"
     serialized = f"{page.model_dump_json()}\n{overview.model_dump_json()}"
-    assert all(display_name not in serialized for display_name in display_names.values())
+    assert all(display_name not in serialized for display_name, _ in display_names.values())
     assert "/home/operator" not in serialized
