@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
 from sqlmodel import Session, select
 
 
@@ -207,3 +209,126 @@ def test_get_workstation_task_overview_projects_unstarted_legacy_stages(session:
     assert overview.pipeline_run_id is None
     assert [stage.name for stage in overview.stages] == CANONICAL_STAGES
     assert all(stage.planned for stage in overview.stages)
+
+
+def test_get_workstation_task_overview_redacts_nested_absolute_paths_from_artifact_metadata(
+    session: Session,
+) -> None:
+    # Given: artifact metadata with sensitive POSIX and Windows host paths.
+    from app.models import Artifact, MediaSource, Task
+    from app.repositories.workstation import get_workstation_task_overview
+
+    task_id = "task-artifact-metadata"
+    raw_paths = {
+        "source_audio_path": "/mnt/recordings/raw/audio.wav",
+        "source_transcript_path": "C:\\Users\\operator\\transcript.json",
+        "source_video_path": "/var/lib/nyaru/source.mp4",
+        "output_file_path": "D:\\exports\\clip.mp4",
+    }
+    metadata = {
+        **raw_paths,
+        "nested": {"outputs": [raw_paths["source_audio_path"], {"path": raw_paths["output_file_path"]}]},
+        "relative_path": "exports/clip.mp4",
+    }
+    session.add(
+        Task(
+            id=task_id,
+            source_url="file:///fixtures/metadata.mp4",
+            normalized_source_url="file:///fixtures/metadata.mp4",
+            title="Metadata fixture",
+        )
+    )
+    session.add(MediaSource(task_id=task_id, kind="local", locator="file:///fixtures/metadata.mp4"))
+    session.add(
+        Artifact(
+            task_id=task_id,
+            stage_name="asr",
+            kind="transcript_json",
+            path="/var/lib/nyaru/tasks/task-artifact-metadata/work/transcript.json",
+            metadata_json=json.dumps(metadata),
+        )
+    )
+    session.commit()
+
+    # When: the v2 overview serializes its artifact metadata.
+    overview = get_workstation_task_overview(session, task_id)
+
+    # Then: metadata is recursively redacted while the content URL remains public API identity.
+    assert overview is not None
+    public_artifact = overview.artifacts[0]
+    public_metadata = json.loads(public_artifact.metadata_json)
+    assert public_artifact.path.endswith("/content/transcript.json")
+    assert public_metadata["source_audio_path"] == "[path]"
+    assert public_metadata["source_transcript_path"] == "[path]"
+    assert public_metadata["source_video_path"] == "[path]"
+    assert public_metadata["output_file_path"] == "[path]"
+    assert public_metadata["nested"]["outputs"] == ["[path]", {"path": "[path]"}]
+    assert public_metadata["relative_path"] == "exports/clip.mp4"
+    serialized_overview = overview.model_dump_json()
+    assert all(raw_path not in serialized_overview for raw_path in raw_paths.values())
+
+
+def test_recovery_actions_are_discriminated_and_reject_unknown_identifiers(session: Session) -> None:
+    # Given: an ASR missing-model failure, which provides both known recovery actions.
+    from app.api.schemas.workstation import (
+        DownloadAsrModelRecoveryAction,
+        RecoveryAction,
+        RetryStageRecoveryAction,
+    )
+    from app.models import MediaSource, Task, TaskStage
+    from app.repositories.workstation import get_workstation_task_overview
+
+    task_id = "task-recovery-actions"
+    session.add(
+        Task(
+            id=task_id,
+            source_url="file:///fixtures/recovery.mp4",
+            normalized_source_url="file:///fixtures/recovery.mp4",
+            status="failed",
+            title="Recovery fixture",
+        )
+    )
+    session.add(MediaSource(task_id=task_id, kind="local", locator="file:///fixtures/recovery.mp4"))
+    session.add(TaskStage(task_id=task_id, name="asr", status="failed", failure_code="asr_missing_model"))
+    session.commit()
+
+    # When: the v2 overview serializes backend-authored recovery actions.
+    overview = get_workstation_task_overview(session, task_id)
+
+    # Then: the variants retain their exact payload contracts and unknown IDs are rejected.
+    assert overview is not None
+    download_action, retry_action = overview.recovery_actions
+    assert isinstance(download_action, DownloadAsrModelRecoveryAction)
+    assert download_action.payload.model_keys == ["whisperx", "alignment"]
+    assert isinstance(retry_action, RetryStageRecoveryAction)
+    assert retry_action.payload.stage_name == "asr"
+    with pytest.raises(ValidationError):
+        TypeAdapter(RecoveryAction).validate_python(
+            {
+                "id": "unknown_action",
+                "label_key": "unknown_action",
+                "description_key": "unknown_action",
+                "enabled": True,
+                "disabled_reason": None,
+                "method": "POST",
+                "endpoint": "/api/tasks/task-recovery-actions/unknown",
+                "payload": {},
+                "confirmation_required": False,
+                "success_behavior": "poll_task",
+            }
+        )
+    with pytest.raises(ValidationError):
+        TypeAdapter(RecoveryAction).validate_python(
+            {
+                "id": "retry_stage",
+                "label_key": "retry_stage",
+                "description_key": "retry_stage",
+                "enabled": True,
+                "disabled_reason": None,
+                "method": "POST",
+                "endpoint": "/api/tasks/task-recovery-actions/retry",
+                "payload": {"stage_name": "asr", "unexpected": "value"},
+                "confirmation_required": False,
+                "success_behavior": "poll_task",
+            }
+        )

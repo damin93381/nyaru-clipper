@@ -137,19 +137,58 @@ class SafeLogOverview(WorkstationSchema):
     display_label: str
 
 
-class RecoveryAction(WorkstationSchema):
-    """A backend-authorized recovery operation for a failed task."""
+class RecoveryActionSchema(WorkstationSchema):
+    """Closed action contract: unknown action and payload fields are rejected."""
 
-    id: Literal["download_asr_model", "retry_stage"]
-    label_key: str
-    description_key: str
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class RetryStageRecoveryPayload(RecoveryActionSchema):
+    """The one required parameter for a stage-retry action."""
+
+    stage_name: str
+
+
+class DownloadAsrModelRecoveryPayload(RecoveryActionSchema):
+    """The model cache keys required by an ASR model download."""
+
+    model_keys: list[Literal["whisperx", "alignment"]]
+
+
+class RetryStageRecoveryAction(RecoveryActionSchema):
+    """Retry the failed stage selected by the backend."""
+
+    id: Literal["retry_stage"]
+    label_key: Literal["retry_stage"]
+    description_key: Literal["retry_stage"]
     enabled: bool
     disabled_reason: str | None
     method: Literal["POST"]
     endpoint: str
-    payload: dict[str, JsonValue]
-    confirmation_required: bool
-    success_behavior: str
+    payload: RetryStageRecoveryPayload
+    confirmation_required: Literal[False]
+    success_behavior: Literal["poll_task"]
+
+
+class DownloadAsrModelRecoveryAction(RecoveryActionSchema):
+    """Download the ASR models required to recover a missing-model failure."""
+
+    id: Literal["download_asr_model"]
+    label_key: Literal["download_asr_model"]
+    description_key: Literal["download_asr_model"]
+    enabled: bool
+    disabled_reason: str | None
+    method: Literal["POST"]
+    endpoint: str
+    payload: DownloadAsrModelRecoveryPayload
+    confirmation_required: Literal[False]
+    success_behavior: Literal["retry_stage_after_success"]
+
+
+RecoveryAction: TypeAlias = Annotated[
+    DownloadAsrModelRecoveryAction | RetryStageRecoveryAction,
+    Field(discriminator="id"),
+]
 
 
 class TaskOverview(TaskListItem):

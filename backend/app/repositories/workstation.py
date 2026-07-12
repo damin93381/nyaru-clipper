@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Final
+from typing import Final, assert_never
 
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import and_, case, exists, func, or_, text
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
@@ -42,6 +44,9 @@ from app.services.storage import build_artifact_content_path, summarize_stage_lo
 
 MAX_PAGE_SIZE: Final = 100
 _LIKE_ESCAPE: Final = "\\"
+_WINDOWS_ABSOLUTE_PATH: Final = re.compile(r"^[A-Za-z]:[\\/]|^\\\\")
+_JSON_VALUE_ADAPTER: Final = TypeAdapter(JsonValue)
+_RECOVERY_ACTION_ADAPTER: Final = TypeAdapter(RecoveryAction)
 _EXPECTED_ARTIFACTS: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
     "ingest": ("source_video", ("source_video",)),
     "media_prep": ("prepared_audio", ("prepared_audio", "asr_audio")),
@@ -140,7 +145,7 @@ def get_workstation_task_overview(session: Session, task_id: str) -> TaskOvervie
         artifact_readiness=_artifact_readiness(stage_records, artifacts),
         artifacts=_artifacts(artifacts),
         safe_logs=_safe_logs(task_id, stage_records),
-        recovery_actions=[RecoveryAction.model_validate(action) for action in serialize_recovery_actions(task_id=task_id, task_status=task.status, stages=legacy_stages)],
+        recovery_actions=_recovery_actions(task_id, task.status, legacy_stages),
     )
 
 
@@ -369,11 +374,51 @@ def _artifacts(artifacts: Sequence[Artifact]) -> list[TaskArtifactOverview]:
             stage_name=artifact.stage_name,
             kind=artifact.kind,
             path=build_artifact_content_path(task_id=artifact.task_id, artifact_id=artifact.id, artifact_path=artifact.path),
-            metadata_json=artifact.metadata_json,
+            metadata_json=_sanitize_artifact_metadata(artifact.metadata_json),
             created_at=artifact.created_at,
         )
         for artifact in artifacts
         if artifact.id is not None
+    ]
+
+
+def _sanitize_artifact_metadata(metadata_json: str) -> str:
+    """Serialize metadata without disclosing absolute host paths at the v2 boundary."""
+    try:
+        metadata = _JSON_VALUE_ADAPTER.validate_json(metadata_json)
+    except ValidationError:
+        return "{}"
+    return json.dumps(_redact_absolute_paths(metadata), separators=(",", ":"), sort_keys=True)
+
+
+def _redact_absolute_paths(value: JsonValue) -> JsonValue:
+    """Recursively preserve JSON structure while replacing absolute path strings."""
+    match value:
+        case str():
+            return "[path]" if _is_absolute_path(value) else value
+        case list():
+            return [_redact_absolute_paths(item) for item in value]
+        case dict():
+            return {key: _redact_absolute_paths(item) for key, item in value.items()}
+        case bool() | int() | float() | None:
+            return value
+        case unreachable:
+            assert_never(unreachable)
+
+
+def _is_absolute_path(value: str) -> bool:
+    return value.startswith("/") or _WINDOWS_ABSOLUTE_PATH.match(value) is not None
+
+
+def _recovery_actions(
+    task_id: str,
+    task_status: str,
+    stages: list[TaskStage],
+) -> list[RecoveryAction]:
+    """Validate backend-authored actions against their exact discriminated contracts."""
+    return [
+        _RECOVERY_ACTION_ADAPTER.validate_python(action)
+        for action in serialize_recovery_actions(task_id=task_id, task_status=task_status, stages=stages)
     ]
 
 
