@@ -484,6 +484,14 @@ def test_workstation_source_labels_normalize_file_uri_display_names(session: Ses
             "Imported file:///home/operator/capture%20copy.mp4",
             "Imported capture copy.mp4",
         ),
+        "task-display-network-uri": (
+            "Imported file://server.example.com/share/capture.mp4",
+            "Imported capture.mp4",
+        ),
+        "task-display-network-encoded-uri": (
+            "Imported file://server.example.com/share/capture%20copy.mp4",
+            "Imported capture copy.mp4",
+        ),
     }
     for task_id, (display_name, _) in display_names.items():
         session.add(

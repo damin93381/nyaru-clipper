@@ -46,7 +46,7 @@ from app.services.storage import build_artifact_content_path, summarize_stage_lo
 MAX_PAGE_SIZE: Final = 100
 _LIKE_ESCAPE: Final = "\\"
 _FILE_URI_IN_TEXT: Final = re.compile(
-    r"file://(?:[^\s/\"'<>()[\]{}.,;!?]+)?/[^\s\"'<>()[\]{},;!?]+",
+    r"file://(?:[^\s/\"'<>()[\]{},;!?]+)?/[^\s\"'<>()[\]{},;!?]+",
     re.IGNORECASE,
 )
 _HOST_PATH_IN_TEXT: Final = re.compile(
