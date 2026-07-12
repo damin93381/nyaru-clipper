@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -92,6 +94,52 @@ def test_bilibili_inspection_normalizes_metadata_without_live_network(client: Te
         "uploader": "Nyaru",
         "duration_seconds": 42.0,
     }
+
+
+def test_bilibili_inspection_uses_bounded_subprocess_timeout(client: TestClient, monkeypatch) -> None:
+    # Given: a downloader subprocess seam that records its execution limit.
+    observed_timeout: float | None = None
+
+    def run(command: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float) -> subprocess.CompletedProcess[str]:
+        nonlocal observed_timeout
+        observed_timeout = timeout
+        return subprocess.CompletedProcess(command, 0, stdout='{"title":"Nyaru stream"}', stderr="")
+
+    monkeypatch.setattr("app.services.source_catalog.subprocess.run", run)
+
+    # When: one Bilibili source is inspected.
+    response = client.post(
+        "/api/v2/sources/bilibili/inspect",
+        json={"url": "https://www.bilibili.com/video/BV1bounded"},
+    )
+
+    # Then: the subprocess is bounded and its result remains usable.
+    assert response.status_code == 200
+    assert observed_timeout is not None
+    assert observed_timeout > 0
+
+
+@pytest.mark.parametrize("error", [OSError("yt-dlp unavailable"), subprocess.TimeoutExpired(["yt-dlp"], 30)])
+def test_bilibili_inspection_converts_subprocess_service_failures_to_validation_errors(
+    client: TestClient,
+    monkeypatch,
+    error: OSError | subprocess.TimeoutExpired,
+) -> None:
+    # Given: the downloader executable is missing or does not finish before its deadline.
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise error
+
+    monkeypatch.setattr("app.services.source_catalog.subprocess.run", run)
+
+    # When: inspection delegates to the downloader subprocess boundary.
+    response = client.post(
+        "/api/v2/sources/bilibili/inspect",
+        json={"url": "https://www.bilibili.com/video/BV1unavailable"},
+    )
+
+    # Then: the endpoint returns its intentional validation/service response rather than a 500.
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Bilibili inspection unavailable"
 
 
 def test_processing_profiles_expose_only_standard_canonical_pipeline(client: TestClient) -> None:

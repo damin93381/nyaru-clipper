@@ -7,7 +7,7 @@ from typing import Annotated, Literal, TypeAlias
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, HttpUrl
 from sqlmodel import Session
 
 from app.api.schemas.workstation import TaskLibrarySummary, TaskListPage, TaskListQuery, TaskOverview, WorkstationSchema
@@ -40,7 +40,7 @@ class BilibiliTaskSource(WorkstationSchema):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["bilibili"]
-    url: str = Field(min_length=1)
+    url: HttpUrl
 
 
 class LocalTaskSource(WorkstationSchema):
@@ -227,7 +227,7 @@ def _create_workstation_task(session: Session, payload: CreateWorkstationTaskReq
 def _task_source(task_id: str, source: TaskSource) -> tuple[str, str, str | None, MediaSource]:
     match source:
         case BilibiliTaskSource(url=url):
-            normalized_url, source_video_id = normalize_source_url(url)
+            normalized_url, source_video_id = normalize_source_url(str(url))
             if source_video_id is None:
                 raise ValueError("Bilibili source URL must contain a BV video identifier")
             media_source = MediaSource(

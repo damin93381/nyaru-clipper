@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from app.settings import get_settings
 
 
 _SUPPORTED_MEDIA_EXTENSIONS: Final = frozenset({".mp4", ".mkv", ".mov", ".webm", ".flv"})
+_BILIBILI_INSPECTION_TIMEOUT_SECONDS: Final = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +110,21 @@ def resolve_local_media_source(root_id: str, relative_path: str) -> LocalMediaSo
     return LocalMediaSource(root_id=root.id, relative_path=_relative_path(root.path, candidate), path=candidate)
 
 
+def resolve_persisted_local_media_source(metadata_json: str) -> LocalMediaSource:
+    """Re-resolve a task's server-authored local-reference metadata inside configured roots."""
+    try:
+        metadata = json.loads(metadata_json)
+    except json.JSONDecodeError as exc:
+        raise SourceCatalogError("Local reference metadata is invalid") from exc
+    if not isinstance(metadata, dict):
+        raise SourceCatalogError("Local reference metadata is invalid")
+    root_id = metadata.get("root_id")
+    relative_path = metadata.get("relative_path")
+    if not isinstance(root_id, str) or not isinstance(relative_path, str):
+        raise SourceCatalogError("Local reference metadata is invalid")
+    return resolve_local_media_source(root_id, relative_path)
+
+
 def inspect_bilibili_source(url: str) -> SourceInspection:
     """Normalize and inspect one Bilibili URL through the downloader metadata boundary."""
     normalized_url, source_video_id = normalize_source_url(url)
@@ -132,7 +149,16 @@ def inspect_bilibili_source(url: str) -> SourceInspection:
 
 def run_bilibili_inspection_command(command: list[str]) -> str:
     """Run the sole inspection subprocess seam used by the Bilibili inspector."""
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_BILIBILI_INSPECTION_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SourceCatalogError("Bilibili inspection unavailable") from exc
     if completed.returncode != 0:
         raise SourceCatalogError("Bilibili inspection failed")
     return completed.stdout

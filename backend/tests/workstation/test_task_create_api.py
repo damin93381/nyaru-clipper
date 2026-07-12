@@ -103,3 +103,59 @@ def test_v2_task_creation_revalidates_local_source_before_persisting_reference(c
         source = session.exec(select(MediaSource).where(MediaSource.task_id == task_id)).one()
         assert source.locator == f"local://{payload['source']['root_id']}/vod/example.mp4"
         assert source.import_mode == "reference"
+
+
+def test_v2_local_reference_task_runs_ingest_without_bilibili_download(client: TestClient, monkeypatch) -> None:
+    # Given: a local task selected through the trusted catalog and non-ingest stages that complete in-process.
+    payload = {
+        "source": {
+            "kind": "local",
+            "root_id": _root_id(client),
+            "relative_path": "vod/example.mp4",
+            "import_mode": "reference",
+        },
+        "profile_id": "standard",
+        "priority": 0,
+    }
+    create_response = client.post("/api/v2/tasks", json=payload)
+    task_id = create_response.json()["task_id"]
+
+    import app.services.task_runner as task_runner
+
+    def downloader_must_not_run(*args, **kwargs) -> None:
+        raise AssertionError("local reference ingestion must not call the Bilibili downloader")
+
+    def complete_remaining_stage(session, current_task_id: str) -> None:
+        assert current_task_id == task_id
+
+    executors = dict(task_runner.STAGE_EXECUTORS)
+    for stage_name in ("media_prep", "asr", "translation", "highlight", "export", "report"):
+        executors[stage_name] = complete_remaining_stage
+    monkeypatch.setattr(task_runner, "download_bilibili_vod", downloader_must_not_run)
+    monkeypatch.setattr(task_runner, "STAGE_EXECUTORS", executors)
+
+    # When: the canonical runner processes the local-reference task.
+    from app.db import session_scope
+
+    with session_scope() as session:
+        result = task_runner.run_task_pipeline(session, task_id)
+
+    # Then: ingest uses the server-side catalog reference and the pipeline can progress to completion.
+    assert create_response.status_code == 201
+    assert result.final_status == "success"
+    assert result.completed_stages == ["ingest", "media_prep", "asr", "translation", "highlight", "export", "report"]
+
+
+def test_v2_task_creation_rejects_non_url_bilibili_source_string(client: TestClient) -> None:
+    # Given: a raw string that happens to contain a BV-like identifier but is not a URL.
+    payload = {
+        "source": {"kind": "bilibili", "url": "not-a-url-with-BV1arbitrary"},
+        "profile_id": "standard",
+        "priority": 0,
+    }
+
+    # When: the string is submitted to the v2 creation boundary.
+    response = client.post("/api/v2/tasks", json=payload)
+
+    # Then: v2 applies the same URL-boundary validation as inspect and v1 creation.
+    assert response.status_code == 422

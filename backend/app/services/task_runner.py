@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from sqlmodel import Session, select
 
-from app.models import CANONICAL_STAGES, Task, TaskJob, TaskStage, utc_now
+from app.models import CANONICAL_STAGES, MediaSource, Task, TaskJob, TaskStage, utc_now
 from app.repositories.tasks import clear_task_execution_progress, get_task_record, upsert_task_execution_progress
 from app.services.asr_child_runner import build_asr_child_command
 from app.services.asr_whisperx import (
@@ -23,7 +23,8 @@ from app.services.highlights import analyze_task_highlights
 from app.services.media_prep import prepare_media_for_asr
 from app.services.pipeline_support import append_stage_log, run_tracked_structured_process_group_command
 from app.services.reporting import generate_task_report
-from app.services.storage import ensure_task_dirs, log_file_for_stage
+from app.services.source_catalog import resolve_persisted_local_media_source
+from app.services.storage import ensure_task_dirs, log_file_for_stage, persist_artifact_metadata
 from app.services.task_control import (
     StaleExecutionTokenError,
     bind_execution_context,
@@ -63,6 +64,32 @@ StageExecutor = Callable[[Session, str], Any]
 
 
 def _execute_ingest(session: Session, task_id: str):
+    media_source = session.exec(select(MediaSource).where(MediaSource.task_id == task_id)).first()
+    if media_source is not None and media_source.kind == "local" and media_source.import_mode == "reference":
+        local_source = resolve_persisted_local_media_source(media_source.metadata_json)
+        persist_artifact_metadata(
+            session,
+            task_id=task_id,
+            stage_name="ingest",
+            kind="source_video",
+            path=local_source.path,
+            metadata={
+                "import_mode": "reference",
+                "relative_path": local_source.relative_path,
+                "root_id": local_source.root_id,
+            },
+        )
+        from app.services.pipeline_support import set_stage_status
+
+        set_stage_status(
+            session,
+            task_id=task_id,
+            stage_name="ingest",
+            status="success",
+            summary="Referenced local source video",
+        )
+        return local_source
+
     result = download_bilibili_vod(session, task_id)
     source_video_id = str(result.source_metadata.get("source_video_id") or "").strip() or None
     if source_video_id:
