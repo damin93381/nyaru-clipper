@@ -343,6 +343,14 @@ def create_task(session: Session, source_url: str) -> tuple[dict[str, Any], bool
     )
     session.add(task)
     session.flush()
+    from app.services.workstation_events import publish_event
+
+    publish_event(
+        session,
+        "task.created",
+        task_id,
+        {"task_id": task_id, "status": task.status},
+    )
 
     stages = [TaskStage(task_id=task_id, name=stage_name, status="pending") for stage_name in CANONICAL_STAGES]
     session.add_all(stages)
@@ -472,11 +480,32 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
         job.finished_at = None
         job.updated_at = utc_now()
     session.add(job)
+    from app.services.workstation_events import publish_event
     from app.services.workstation_queue import requeue_task
     from app.services.workstation_runs import create_pipeline_run
 
     create_pipeline_run(session, task_id, "retry")
     requeue_task(session, task_id)
+    publish_event(
+        session,
+        "task.updated",
+        task_id,
+        {"task_id": task_id, "status": record.task.status},
+    )
+    for stage in record.stages:
+        if CANONICAL_STAGES.index(stage.name) >= reset_index:
+            publish_event(
+                session,
+                "stage.updated",
+                task_id,
+                {
+                    "task_id": task_id,
+                    "stage_name": stage.name,
+                    "status": stage.status,
+                    "failure_code": stage.failure_code,
+                    "attempts": stage.attempts,
+                },
+            )
     session.flush()
     return {"task_id": task_id, "retry_stage": stage_name, "status": "pending"}
 

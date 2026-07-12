@@ -39,6 +39,7 @@ __all__ = [
     "Task",
     "TaskJob",
     "TaskStage",
+    "WorkstationEvent",
     "utc_now",
 ]
 
@@ -201,3 +202,13 @@ class StageRun(SQLModel, table=True):
     attempts: int = Field(default=0)
     started_at: datetime | None = Field(default=None)
     finished_at: datetime | None = Field(default=None)
+
+
+class WorkstationEvent(SQLModel, table=True):
+    """A durable, public-safe workstation state transition for SSE clients."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    event_type: str = Field(index=True)
+    entity_id: str = Field(index=True)
+    payload_json: str
+    created_at: datetime = Field(default_factory=utc_now, index=True)

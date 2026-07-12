@@ -86,5 +86,26 @@ def persist_artifact_metadata(
             for candidate in get_task_root(task_id).rglob("*")
             if candidate.is_file()
         )
+        session.add(task)
     session.refresh(artifact)
+    if artifact.id is None:
+        raise RuntimeError("Persisted artifact is missing its ID")
+    from app.services.workstation_events import publish_event
+
+    publish_event(
+        session,
+        "artifact.ready",
+        task_id,
+        {
+            "task_id": task_id,
+            "artifact_id": artifact.id,
+            "stage_name": stage_name,
+            "kind": kind,
+            "path": build_artifact_content_path(
+                task_id=task_id,
+                artifact_id=artifact.id,
+                artifact_path=path,
+            ),
+        },
+    )
     return artifact

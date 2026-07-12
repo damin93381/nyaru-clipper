@@ -118,6 +118,7 @@ def enqueue_task(session: Session, task_id: str) -> QueueEntry:
     queue_state.updated_at = now
     session.add(queue_state)
     _normalize_positions(session, now=now)
+    _publish_queue_updated(session, get_queue_snapshot(session))
     return entry
 
 
@@ -251,4 +252,33 @@ def _increment_and_snapshot(session: Session, *, now) -> QueueSnapshot:
     state.updated_at = now
     session.add(state)
     session.flush()
-    return get_queue_snapshot(session)
+    snapshot = get_queue_snapshot(session)
+    _publish_queue_updated(session, snapshot)
+    return snapshot
+
+
+def _publish_queue_updated(session: Session, snapshot: QueueSnapshot) -> None:
+    """Stage a public queue projection in the same transaction as its mutation."""
+    from app.services.workstation_events import publish_event
+
+    def event_item(item: QueueItem | None) -> dict[str, str | int] | None:
+        if item is None:
+            return None
+        return {
+            "task_id": item.task_id,
+            "position": item.position,
+            "priority": item.priority,
+            "state": item.state,
+        }
+
+    publish_event(
+        session,
+        "queue.updated",
+        "queue",
+        {
+            "revision": snapshot.revision,
+            "active": event_item(snapshot.active),
+            "queued": [event_item(item) for item in snapshot.queued],
+            "paused": [event_item(item) for item in snapshot.paused],
+        },
+    )
