@@ -410,6 +410,10 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
     record = get_task_record(session, task_id)
     if record is None:
         return None
+    if record.task.status not in TERMINAL_STATUSES:
+        from app.services.workstation_queue import QueueConflict, get_queue_snapshot
+
+        raise QueueConflict(get_queue_snapshot(session), "Task must be terminal before retry")
 
     reset_index = CANONICAL_STAGES.index(stage_name)
     for stage in record.stages:

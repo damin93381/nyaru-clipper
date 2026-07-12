@@ -135,6 +135,52 @@ def test_failure_cancellation_and_retry_preserve_accurate_run_history(database, 
     assert run_count == 2
 
 
+def test_retry_rechecks_task_terminality_after_acquiring_the_queue_lock(database, monkeypatch) -> None:
+    from app.models import PipelineRun, QueueState, Task
+    from app.repositories.tasks import retry_task_from_stage
+    from app.services.workstation_queue import QueueConflict
+    import app.services.workstation_queue as workstation_queue
+
+    with Session(database) as session:
+        _create_task(session, "task-retry-race")
+        task = session.get(Task, "task-retry-race")
+        assert task is not None
+        task.status = "failed"
+        session.add(task)
+        session.commit()
+
+    original_begin_queue_mutation = workstation_queue.begin_queue_mutation
+    losing_session: Session | None = None
+
+    def interleave_winning_retry_before_losing_lock(session: Session) -> None:
+        if session is losing_session:
+            session.rollback()
+            with Session(database) as winning_session:
+                result = retry_task_from_stage(winning_session, "task-retry-race", "ingest")
+                assert result is not None
+                winning_session.commit()
+        original_begin_queue_mutation(session)
+
+    monkeypatch.setattr(workstation_queue, "begin_queue_mutation", interleave_winning_retry_before_losing_lock)
+
+    with Session(database) as session:
+        losing_session = session
+        with pytest.raises(QueueConflict, match="terminal"):
+            retry_task_from_stage(session, "task-retry-race", "ingest")
+        session.rollback()
+
+    with Session(database) as session:
+        runs = session.exec(select(PipelineRun).where(PipelineRun.task_id == "task-retry-race")).all()
+        queue_state = session.get(QueueState, 1)
+        task = session.get(Task, "task-retry-race")
+
+    assert len(runs) == 1
+    assert queue_state is not None
+    assert queue_state.revision == 2
+    assert task is not None
+    assert task.status == "pending"
+
+
 def test_cancellation_finalizes_the_pending_run_without_erasing_stage_history(database, monkeypatch) -> None:
     from app.models import PipelineRun, StageRun
     from app.services.task_control import activate_execution, request_cancel
