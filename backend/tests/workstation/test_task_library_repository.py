@@ -468,3 +468,47 @@ def test_workstation_task_source_labels_do_not_expose_local_host_paths(session: 
     assert overview.source_label == "capture.mp4"
     assert all(locator not in page.model_dump_json() for locator in raw_locators)
     assert all(locator not in overview.model_dump_json() for locator in raw_locators)
+
+
+def test_workstation_source_labels_normalize_file_uri_display_names(session: Session) -> None:
+    # Given: display names that themselves contain plain and encoded local file URIs.
+    from app.api.schemas.workstation import TaskListQuery
+    from app.models import MediaSource, Task
+    from app.repositories.workstation import get_workstation_task_overview, list_workstation_tasks
+
+    display_names = {
+        "task-display-uri": "file:///home/operator/capture.mp4",
+        "task-display-encoded-uri": "file:///home/operator/capture%20copy.mp4",
+    }
+    for task_id, display_name in display_names.items():
+        session.add(
+            Task(
+                id=task_id,
+                source_url="file:///mnt/private/original.mp4",
+                normalized_source_url=f"file:///mnt/private/{task_id}.mp4",
+                title=task_id,
+            )
+        )
+        session.add(
+            MediaSource(
+                task_id=task_id,
+                kind="local",
+                locator="file:///mnt/private/original.mp4",
+                display_name=display_name,
+            )
+        )
+    session.commit()
+
+    # When: file-URI display names are projected through the v2 list and overview.
+    page = list_workstation_tasks(session, TaskListQuery(page_size=50))
+    overview = get_workstation_task_overview(session, "task-display-uri")
+
+    # Then: filenames remain useful without exposing either URI or its host path.
+    labels = {item.task_id: item.source_label for item in page.items}
+    assert labels["task-display-uri"] == "capture.mp4"
+    assert labels["task-display-encoded-uri"] == "capture copy.mp4"
+    assert overview is not None
+    assert overview.source_label == "capture.mp4"
+    serialized = f"{page.model_dump_json()}\n{overview.model_dump_json()}"
+    assert all(display_name not in serialized for display_name in display_names.values())
+    assert "/home/operator" not in serialized

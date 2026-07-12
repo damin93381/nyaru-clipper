@@ -274,11 +274,11 @@ def _source_label(source: MediaSource | None) -> str:
     if source is None:
         return "Source"
     if source.display_name:
+        if source.display_name.casefold().startswith("file:"):
+            return _local_source_label(source.display_name, source.kind)
         return _sanitize_visible_text(source.display_name) or _generic_source_label(source.kind)
     if _is_local_or_file_source(source):
-        basename = _local_source_basename(source.locator)
-        if basename:
-            return _sanitize_visible_text(basename) or _generic_source_label(source.kind)
+        return _local_source_label(source.locator, source.kind)
     return _generic_source_label(source.kind)
 
 
@@ -295,6 +295,14 @@ def _local_source_basename(locator: str) -> str | None:
     path = unquote(urlsplit(locator).path) if locator.casefold().startswith("file:") else locator
     basename = re.split(r"[\\/]", path.rstrip("\\/"))[-1]
     return basename or None
+
+
+def _local_source_label(locator: str, source_kind: str) -> str:
+    """Project a local/file locator as its basename or a safe generic label."""
+    basename = _local_source_basename(locator)
+    if basename:
+        return _sanitize_visible_text(basename) or _generic_source_label(source_kind)
+    return _generic_source_label(source_kind)
 
 
 def _generic_source_label(source_kind: str) -> str:
