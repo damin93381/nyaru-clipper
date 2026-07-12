@@ -35,6 +35,13 @@ from app.services.task_control import (
     get_execution_context,
 )
 from app.services.translation_provider import translate_task_subtitles
+from app.services.workstation_runs import (
+    create_pipeline_run,
+    finish_pipeline_run,
+    get_pending_pipeline_run,
+    start_pipeline_run,
+    sync_stage_run,
+)
 
 CANONICAL_STAGE_ORDER = CANONICAL_STAGES
 
@@ -242,6 +249,10 @@ def run_task_pipeline(
         job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).first()
         if job is None:
             raise ValueError(f"Task job not found for task_id: {task_id}")
+        pipeline_run = get_pending_pipeline_run(session, task_id)
+        if pipeline_run is None:
+            pipeline_run = create_pipeline_run(session, task_id, "legacy")
+        start_pipeline_run(session, pipeline_run)
 
         stages = _load_stage_map(session, task_id)
         first_stage_name = start_stage_name or job.stage_name or _first_incomplete_stage_name(stages)
@@ -254,6 +265,8 @@ def run_task_pipeline(
         try:
             _ensure_current_execution_context_if_bound(session, task_id=task_id)
             if _finalize_cancelled_if_requested(session, task_id=task_id):
+                _sync_current_stage_run(session, pipeline_run.id, task_id)
+                finish_pipeline_run(session, pipeline_run, "cancelled")
                 return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
 
             for index in range(start_index, len(CANONICAL_STAGE_ORDER)):
@@ -263,6 +276,8 @@ def run_task_pipeline(
 
                 _ensure_current_execution_context_if_bound(session, task_id=task_id)
                 if _finalize_cancelled_if_requested(session, task_id=task_id):
+                    _sync_current_stage_run(session, pipeline_run.id, task_id)
+                    finish_pipeline_run(session, pipeline_run, "cancelled")
                     return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
 
                 if index == start_index and claimed_stage_running:
@@ -275,9 +290,12 @@ def run_task_pipeline(
                     session.add(task)
                     session.add(job)
                     session.add(stage)
+                    sync_stage_run(session, pipeline_run.id, stage)
                     session.commit()
                     stages = _load_stage_map(session, task_id)
                     stage = stages[stage_name]
+
+                sync_stage_run(session, pipeline_run.id, stage)
 
                 append_stage_log(log_path, f"task_runner:start stage={stage_name}")
 
@@ -299,6 +317,8 @@ def run_task_pipeline(
                     session.add(task)
                     session.add(job)
                     session.add(stage)
+                    sync_stage_run(session, pipeline_run.id, stage)
+                    finish_pipeline_run(session, pipeline_run, "failed")
                     session.commit()
                     raise
 
@@ -309,6 +329,9 @@ def run_task_pipeline(
                     _mark_stage_success(stage, summary=f"Completed {stage_name}")
 
                 if _finalize_cancelled_if_requested(session, task_id=task_id):
+                    sync_stage_run(session, pipeline_run.id, stage)
+                    _sync_current_stage_run(session, pipeline_run.id, task_id)
+                    finish_pipeline_run(session, pipeline_run, "cancelled")
                     session.commit()
                     completed_stages.append(stage_name)
                     append_stage_log(log_path, f"task_runner:complete stage={stage_name} status={stage.status}")
@@ -320,6 +343,7 @@ def run_task_pipeline(
                 session.add(task)
                 session.add(job)
                 session.add(stage)
+                sync_stage_run(session, pipeline_run.id, stage)
                 session.commit()
                 append_stage_log(log_path, f"task_runner:complete stage={stage_name} status={stage.status}")
                 completed_stages.append(stage_name)
@@ -335,6 +359,7 @@ def run_task_pipeline(
                 task.updated_at = job.finished_at
                 session.add(job)
                 session.add(task)
+                finish_pipeline_run(session, pipeline_run, "success")
                 session.commit()
         except StaleExecutionTokenError:
             session.rollback()
@@ -356,6 +381,17 @@ def _load_stage_map(session: Session, task_id: str) -> dict[str, TaskStage]:
         stage.name: stage
         for stage in session.exec(select(TaskStage).where(TaskStage.task_id == task_id)).all()
     }
+
+
+def _sync_current_stage_run(session: Session, run_id: str, task_id: str) -> None:
+    job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).first()
+    if job is None:
+        return
+    stage = session.exec(
+        select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == job.stage_name)
+    ).first()
+    if stage is not None:
+        sync_stage_run(session, run_id, stage)
 
 
 def _first_incomplete_stage_name(stages: dict[str, TaskStage]) -> str:

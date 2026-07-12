@@ -22,6 +22,8 @@ from app.services.task_control import (
     clear_execution_control,
 )
 from app.services.task_runner import run_task_pipeline
+from app.services.workstation_queue import claim_next_queue_entry, finish_queue_entry
+from app.services.workstation_runs import finish_pipeline_run, get_pending_pipeline_run, start_pipeline_run, sync_stage_run
 
 
 @dataclass(slots=True)
@@ -116,6 +118,12 @@ def _mark_job_stale_failed(session, job: TaskJob) -> None:
         stage.updated_at = now
         session.add(stage)
         append_stage_log(log_file_for_stage(job.task_id, job.stage_name), "worker:recovered stale running job")
+        pending_run = get_pending_pipeline_run(session, job.task_id)
+        if pending_run is not None:
+            start_pipeline_run(session, pending_run)
+            sync_stage_run(session, pending_run.id, stage)
+            finish_pipeline_run(session, pending_run, "failed")
+    finish_queue_entry(session, job.task_id)
 
 
 def _recover_stale_running_jobs(session) -> None:
@@ -147,20 +155,23 @@ def claim_next_job() -> ClaimedJob | None:
         ).first()
         if running_gpu_job is not None:
             return None
-
-        job = session.exec(
-            select(TaskJob).where(TaskJob.status == "pending").order_by(TaskJob.created_at)
-        ).first()
-        if job is None:
+        session.commit()
+        queue_entry = claim_next_queue_entry(session)
+        if queue_entry is None:
             return None
 
-        task = session.get(Task, job.task_id)
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == queue_entry.task_id)).first()
+        task = session.get(Task, queue_entry.task_id)
+        if job is None:
+            finish_queue_entry(session, queue_entry.task_id)
+            return None
         stage = session.exec(
             select(TaskStage)
-            .where(TaskStage.task_id == job.task_id)
+            .where(TaskStage.task_id == queue_entry.task_id)
             .where(TaskStage.name == job.stage_name)
         ).first()
         if task is None or stage is None:
+            finish_queue_entry(session, queue_entry.task_id)
             return None
 
         now = utc_now()
@@ -205,6 +216,13 @@ def complete_job(task_id: str, *, success: bool) -> None:
             stage.summary = "Completed by worker" if success else "Worker execution failed"
             stage.updated_at = now
             session.add(stage)
+        pending_run = get_pending_pipeline_run(session, task_id)
+        if pending_run is not None:
+            start_pipeline_run(session, pending_run)
+            if stage is not None:
+                sync_stage_run(session, pending_run.id, stage)
+            finish_pipeline_run(session, pending_run, "success" if success else "failed")
+        finish_queue_entry(session, task_id)
 
 
 def run_worker_iteration(processor: Callable[[ClaimedJob], bool] | None = None) -> ClaimedJob | None:
@@ -217,13 +235,21 @@ def run_worker_iteration(processor: Callable[[ClaimedJob], bool] | None = None) 
         with session_scope() as session:
             activate_execution(session, task_id=claimed_job.task_id, execution_token=execution_token)
             try:
-                run_task_pipeline(
-                    session,
-                    claimed_job.task_id,
-                    start_stage_name=claimed_job.stage_name,
-                    claimed_stage_running=True,
-                    execution_token=execution_token,
-                )
+                try:
+                    result = run_task_pipeline(
+                        session,
+                        claimed_job.task_id,
+                        start_stage_name=claimed_job.stage_name,
+                        claimed_stage_running=True,
+                        execution_token=execution_token,
+                    )
+                except Exception:
+                    finish_queue_entry(session, claimed_job.task_id)
+                    session.commit()
+                    raise
+                if result.final_status in {"success", "failed", "cancelled"}:
+                    finish_queue_entry(session, claimed_job.task_id)
+                    session.commit()
             finally:
                 if preflight_runtime_summary is not None:
                     append_stage_log(log_file_for_stage(claimed_job.task_id, claimed_job.stage_name), preflight_runtime_summary)

@@ -465,3 +465,35 @@ def test_claim_next_job_keeps_fresh_running_gpu_job_blocking_queue(backend_env, 
     claimed = claim_next_job()
 
     assert claimed is None
+
+
+def test_worker_queue_claim_updates_legacy_job_and_finishes_queue_entry(backend_env, monkeypatch) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1queueworker001")
+
+    from app.db import session_scope
+    from app.models import PipelineRun, QueueEntry, TaskJob
+    from app.worker import run_worker_iteration
+    import app.services.task_runner as task_runner
+
+    monkeypatch.setattr(
+        task_runner,
+        "STAGE_EXECUTORS",
+        {stage_name: lambda session, current_task_id: None for stage_name in task_runner.CANONICAL_STAGE_ORDER},
+    )
+    monkeypatch.setattr("app.services.capability_checks.get_runtime_capabilities", lambda: {"warnings": [], "issues": []})
+
+    claimed = run_worker_iteration()
+
+    assert claimed is not None
+    assert claimed.task_id == task_id
+    with session_scope() as session:
+        queue_entry = session.get(QueueEntry, task_id)
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+        run = session.exec(select(PipelineRun).where(PipelineRun.task_id == task_id)).one()
+        queue_entry_state = queue_entry.state if queue_entry is not None else None
+        job_status = job.status
+        run_status = run.status
+
+    assert queue_entry_state == "finished"
+    assert job_status == "success"
+    assert run_status == "success"
