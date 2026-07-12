@@ -136,17 +136,18 @@ def test_failure_cancellation_and_retry_preserve_accurate_run_history(database, 
 
 
 def test_retry_rechecks_task_terminality_after_acquiring_the_queue_lock(database, monkeypatch) -> None:
-    from app.models import PipelineRun, QueueState, Task
+    from app.models import PipelineRun, QueueState, Task, TaskStage
     from app.repositories.tasks import retry_task_from_stage
     from app.services.workstation_queue import QueueConflict
     import app.services.workstation_queue as workstation_queue
 
     with Session(database) as session:
         _create_task(session, "task-retry-race")
-        task = session.get(Task, "task-retry-race")
-        assert task is not None
-        task.status = "failed"
-        session.add(task)
+        stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == "task-retry-race").where(TaskStage.name == "ingest")
+        ).one()
+        stage.status = "failed"
+        session.add(stage)
         session.commit()
 
     original_begin_queue_mutation = workstation_queue.begin_queue_mutation

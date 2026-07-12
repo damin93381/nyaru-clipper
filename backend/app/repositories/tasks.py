@@ -26,6 +26,7 @@ from app.services.recovery_actions import serialize_recovery_actions, stage_disp
 from app.services.storage import build_artifact_content_path, ensure_task_dirs, summarize_stage_log
 
 BV_PATTERN = re.compile(r"(BV[0-9A-Za-z]+)", re.IGNORECASE)
+RETRYABLE_LEGACY_STAGE_STATUSES = frozenset({"failed", "cancelled"})
 
 
 @dataclass(slots=True)
@@ -399,7 +400,7 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
         return None
     if stage_name not in CANONICAL_STAGES:
         raise ValueError(f"Unknown stage: {stage_name}")
-    if record.task.status not in TERMINAL_STATUSES:
+    if not _retry_is_allowed(record, stage_name):
         from app.services.workstation_queue import QueueConflict, get_queue_snapshot
 
         raise QueueConflict(get_queue_snapshot(session), "Task must be terminal before retry")
@@ -410,7 +411,7 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
     record = get_task_record(session, task_id)
     if record is None:
         return None
-    if record.task.status not in TERMINAL_STATUSES:
+    if not _retry_is_allowed(record, stage_name):
         from app.services.workstation_queue import QueueConflict, get_queue_snapshot
 
         raise QueueConflict(get_queue_snapshot(session), "Task must be terminal before retry")
@@ -451,3 +452,10 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
     requeue_task(session, task_id)
     session.flush()
     return {"task_id": task_id, "retry_stage": stage_name, "status": "pending"}
+
+
+def _retry_is_allowed(record: TaskRecord, stage_name: str) -> bool:
+    """Allow terminal tasks and stale legacy tasks whose requested stage already stopped."""
+    return record.task.status in TERMINAL_STATUSES or any(
+        stage.name == stage_name and stage.status in RETRYABLE_LEGACY_STAGE_STATUSES for stage in record.stages
+    )

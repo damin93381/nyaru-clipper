@@ -157,6 +157,7 @@ def test_task_artifact_paths_are_serialized_to_app_routes_and_served(client: Tes
 
 
 def test_retry_resets_failed_stage_and_downstream_stages_to_pending(client: TestClient) -> None:
+    # Given: a legacy task whose failed stage was persisted before its task-level status caught up.
     create_response = client.post(
         "/api/tasks",
         json={"source_url": "https://www.bilibili.com/video/BV1ab411c7mE"},

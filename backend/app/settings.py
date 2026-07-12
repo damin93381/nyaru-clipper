@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
 
     bilibili_cookie_path: Path | None = None
+    local_import_roots: str = ""
     bbdown_binary: str = "BBDown"
     ytdlp_binary: str = "yt-dlp"
     ffmpeg_binary: str = "ffmpeg"
