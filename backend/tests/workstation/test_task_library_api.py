@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 
 def _reset_runtime_state() -> None:
@@ -154,3 +154,78 @@ def test_task_library_bulk_unarchives_and_rejects_active_deletion(client: TestCl
     assert delete_response.json()["results"] == [
         {"task_id": "task-running", "status": "rejected", "message": "Task is actively running"}
     ]
+
+
+def test_task_library_bulk_delete_removes_all_task_owned_database_rows(client: TestClient) -> None:
+    # Given: an inactive task with every direct and pipeline-owned database record, plus a running task.
+    from app.db import session_scope
+    from app.models import (
+        Artifact,
+        ClipCandidate,
+        MediaSource,
+        PipelineRun,
+        QueueEntry,
+        StageRun,
+        Task,
+        TaskExecutionControl,
+        TaskExecutionProgress,
+        TaskJob,
+        TaskStage,
+        TaskTag,
+        TaskTagLink,
+    )
+
+    deleted_task_id = "task-delete"
+    deleted_run_id = "run-delete"
+    with session_scope() as session:
+        _seed_task(session, task_id=deleted_task_id, status="success")
+        _seed_task(session, task_id="task-running", status="running")
+        session.add(TaskTag(name="delete-tag"))
+        session.add_all(
+            [
+                TaskJob(task_id=deleted_task_id, stage_name="asr"),
+                TaskStage(task_id=deleted_task_id, name="asr"),
+                Artifact(task_id=deleted_task_id, stage_name="asr", kind="transcript_json", path="work/asr.json"),
+                ClipCandidate(task_id=deleted_task_id, start_seconds=1.0, end_seconds=2.0, score=0.9, reason="fixture"),
+                TaskExecutionProgress(
+                    task_id=deleted_task_id,
+                    stage_name="asr",
+                    current_phase="persist",
+                    phase_index=1,
+                    phase_count=1,
+                ),
+                TaskExecutionControl(task_id=deleted_task_id),
+                TaskTagLink(task_id=deleted_task_id, tag_name="delete-tag"),
+                QueueEntry(task_id=deleted_task_id, position=1),
+                PipelineRun(id=deleted_run_id, task_id=deleted_task_id, status="success"),
+                StageRun(run_id=deleted_run_id, name="asr", status="success"),
+            ]
+        )
+
+    # When: the inactive task, a missing task, and an active task are deleted together.
+    response = client.post(
+        "/api/v2/tasks/bulk",
+        json={"operation": "delete", "task_ids": [deleted_task_id, "task-missing", "task-running"]},
+    )
+
+    # Then: each result stays independent and no database rows remain for the deleted task.
+    assert response.status_code == 200
+    assert response.json()["results"] == [
+        {"task_id": deleted_task_id, "status": "success", "message": None},
+        {"task_id": "task-missing", "status": "not_found", "message": "Task not found"},
+        {"task_id": "task-running", "status": "rejected", "message": "Task is actively running"},
+    ]
+
+    with session_scope() as session:
+        assert session.get(Task, deleted_task_id) is None
+        assert session.get(TaskExecutionProgress, deleted_task_id) is None
+        assert session.get(TaskExecutionControl, deleted_task_id) is None
+        assert session.exec(select(TaskJob).where(TaskJob.task_id == deleted_task_id)).all() == []
+        assert session.exec(select(TaskStage).where(TaskStage.task_id == deleted_task_id)).all() == []
+        assert session.exec(select(Artifact).where(Artifact.task_id == deleted_task_id)).all() == []
+        assert session.exec(select(ClipCandidate).where(ClipCandidate.task_id == deleted_task_id)).all() == []
+        assert session.exec(select(MediaSource).where(MediaSource.task_id == deleted_task_id)).all() == []
+        assert session.exec(select(TaskTagLink).where(TaskTagLink.task_id == deleted_task_id)).all() == []
+        assert session.exec(select(QueueEntry).where(QueueEntry.task_id == deleted_task_id)).all() == []
+        assert session.exec(select(PipelineRun).where(PipelineRun.task_id == deleted_task_id)).all() == []
+        assert session.exec(select(StageRun).where(StageRun.run_id == deleted_run_id)).all() == []

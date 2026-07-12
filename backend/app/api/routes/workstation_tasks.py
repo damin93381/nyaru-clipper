@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import ConfigDict, Field
-from sqlalchemy import delete
 from sqlmodel import Session
 
 from app.api.schemas.workstation import TaskLibrarySummary, TaskListPage, TaskListQuery, TaskOverview, WorkstationSchema
 from app.db import get_session
-from app.models import Task, TaskTag, TaskTagLink, utc_now
 from app.repositories.workstation import (
     get_task_library_summary,
     get_workstation_task_overview,
     list_workstation_tasks,
 )
+from app.services.task_library_lifecycle import (
+    TaskBulkOperation,
+    TaskMetadataPatch,
+    apply_task_bulk_mutation,
+    patch_task_metadata,
+)
 
 
 router = APIRouter(prefix="/v2/tasks", tags=["workstation-tasks"])
-
-BulkTaskOperation: TypeAlias = Literal["archive", "unarchive", "delete"]
 
 
 class TaskPatchRequest(WorkstationSchema):
@@ -39,7 +41,7 @@ class BulkTaskMutationRequest(WorkstationSchema):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    operation: BulkTaskOperation
+    operation: TaskBulkOperation
     task_ids: Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1)]
 
 
@@ -78,9 +80,14 @@ def bulk_task_mutation_endpoint(
     session: Session = Depends(get_session),
 ) -> BulkTaskMutationResponse:
     """Apply one archive, unarchive, or deletion operation per requested task."""
-    results = [_bulk_result(session, task_id, payload.operation) for task_id in payload.task_ids]
+    results = [apply_task_bulk_mutation(session, task_id, payload.operation) for task_id in payload.task_ids]
     session.commit()
-    return BulkTaskMutationResponse(results=results)
+    return BulkTaskMutationResponse(
+        results=[
+            BulkTaskMutationResult(task_id=result.task_id, status=result.status, message=result.message)
+            for result in results
+        ]
+    )
 
 
 @router.get("/{task_id}", response_model=TaskOverview)
@@ -99,54 +106,21 @@ def patch_task_library_endpoint(
     session: Session = Depends(get_session),
 ) -> TaskOverview:
     """Replace the requested editable task metadata fields."""
-    task = session.get(Task, task_id)
+    patch = TaskMetadataPatch(
+        title=payload.title,
+        tags=tuple(payload.tags) if payload.tags is not None else None,
+        archived=payload.archived,
+        updates_title="title" in payload.model_fields_set,
+        updates_tags="tags" in payload.model_fields_set,
+        updates_archive="archived" in payload.model_fields_set,
+    )
+    task = patch_task_metadata(session, task_id, patch)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    _apply_task_patch(session, task, payload)
     session.commit()
 
     overview = get_workstation_task_overview(session, task_id)
     if overview is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return overview
-
-
-def _apply_task_patch(session: Session, task: Task, payload: TaskPatchRequest) -> None:
-    """Apply present fields only, replacing tag membership atomically in the session."""
-    if "title" in payload.model_fields_set:
-        task.title = payload.title
-    if "archived" in payload.model_fields_set:
-        task.archived_at = utc_now() if payload.archived else None
-    if "tags" in payload.model_fields_set:
-        session.exec(delete(TaskTagLink).where(TaskTagLink.task_id == task.id))
-        for tag_name in sorted(set(payload.tags or [])):
-            if session.get(TaskTag, tag_name) is None:
-                session.add(TaskTag(name=tag_name))
-            session.add(TaskTagLink(task_id=task.id, tag_name=tag_name))
-    task.updated_at = utc_now()
-    session.add(task)
-
-
-def _bulk_result(session: Session, task_id: str, operation: BulkTaskOperation) -> BulkTaskMutationResult:
-    """Apply one requested bulk operation without preventing adjacent task outcomes."""
-    task = session.get(Task, task_id)
-    if task is None:
-        return BulkTaskMutationResult(task_id=task_id, status="not_found", message="Task not found")
-
-    match operation:
-        case "archive":
-            task.archived_at = utc_now()
-            task.updated_at = utc_now()
-            session.add(task)
-        case "unarchive":
-            task.archived_at = None
-            task.updated_at = utc_now()
-            session.add(task)
-        case "delete":
-            is_active = task.status == "running"
-            if is_active:
-                return BulkTaskMutationResult(task_id=task_id, status="rejected", message="Task is actively running")
-            session.exec(delete(TaskTagLink).where(TaskTagLink.task_id == task.id))
-            session.delete(task)
-    return BulkTaskMutationResult(task_id=task_id, status="success", message=None)
