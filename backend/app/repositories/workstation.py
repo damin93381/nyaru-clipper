@@ -8,6 +8,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Final, assert_never
+from urllib.parse import unquote, urlsplit
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import and_, case, exists, func, or_, text
@@ -256,7 +257,7 @@ def _task_list_item(
         task_id=task.id,
         title=task.title or task.source_video_id or task.id,
         source_kind=source.kind if source is not None else "unknown",
-        source_label=(source.display_name or source.locator) if source is not None else task.source_url,
+        source_label=_source_label(source),
         status=task.status,
         current_stage=_current_stage(stages),
         progress_percent=_progress_percent(stages, execution_progress),
@@ -266,6 +267,44 @@ def _task_list_item(
         updated_at=task.updated_at,
         archived_at=task.archived_at,
     )
+
+
+def _source_label(source: MediaSource | None) -> str:
+    """Return a useful v2 source label without serializing a host locator."""
+    if source is None:
+        return "Source"
+    if source.display_name:
+        return _sanitize_visible_text(source.display_name) or _generic_source_label(source.kind)
+    if _is_local_or_file_source(source):
+        basename = _local_source_basename(source.locator)
+        if basename:
+            return _sanitize_visible_text(basename) or _generic_source_label(source.kind)
+    return _generic_source_label(source.kind)
+
+
+def _is_local_or_file_source(source: MediaSource) -> bool:
+    match source.kind:
+        case "local":
+            return True
+        case _:
+            return source.locator.casefold().startswith("file:")
+
+
+def _local_source_basename(locator: str) -> str | None:
+    """Extract a cross-platform file basename without retaining its parent path."""
+    path = unquote(urlsplit(locator).path) if locator.casefold().startswith("file:") else locator
+    basename = re.split(r"[\\/]", path.rstrip("\\/"))[-1]
+    return basename or None
+
+
+def _generic_source_label(source_kind: str) -> str:
+    match source_kind:
+        case "local":
+            return "Local source"
+        case "bilibili":
+            return "Bilibili source"
+        case _:
+            return "Source"
 
 
 def _current_stage(stages: Sequence[TaskStage]) -> str | None:

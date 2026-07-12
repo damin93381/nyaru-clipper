@@ -422,3 +422,49 @@ def test_get_workstation_task_overview_redacts_host_paths_from_all_user_visible_
     assert json.loads(overview.artifacts[0].metadata_json)["paths"] == ["[path]"] * len(raw_paths)
     serialized_overview = overview.model_dump_json()
     assert all(raw_path not in serialized_overview for raw_path in raw_paths)
+
+
+def test_workstation_task_source_labels_do_not_expose_local_host_paths(session: Session) -> None:
+    # Given: local/file sources with POSIX, Windows-drive, UNC, display-name, and empty locators.
+    from app.api.schemas.workstation import TaskListQuery
+    from app.models import MediaSource, Task
+    from app.repositories.workstation import get_workstation_task_overview, list_workstation_tasks
+
+    source_fixtures = [
+        ("task-file", "file:///home/operator/capture.mp4", None, "capture.mp4"),
+        ("task-windows", "C:\\Users\\operator\\Videos\\winter.mkv", None, "winter.mkv"),
+        ("task-unc", "\\\\server\\share\\source.mp4", None, "source.mp4"),
+        ("task-display", "file:///mnt/private/source.mp4", "Imported /home/operator/source.mp4", "Imported [path]"),
+        ("task-empty", "", None, "Local source"),
+    ]
+    raw_locators = [fixture[1] for fixture in source_fixtures[:-1]]
+    for task_id, locator, display_name, _ in source_fixtures:
+        session.add(
+            Task(
+                id=task_id,
+                source_url=locator or "file:///var/lib/nyaru/unknown.mp4",
+                normalized_source_url=locator or f"file:///var/lib/nyaru/{task_id}.mp4",
+                title=task_id,
+            )
+        )
+        session.add(
+            MediaSource(
+                task_id=task_id,
+                kind="local",
+                locator=locator,
+                display_name=display_name,
+            )
+        )
+    session.commit()
+
+    # When: the same local sources are projected in the list and an overview.
+    page = list_workstation_tasks(session, TaskListQuery(page_size=50))
+    overview = get_workstation_task_overview(session, "task-file")
+
+    # Then: labels retain useful filenames or a generic label without raw host paths.
+    labels = {item.task_id: item.source_label for item in page.items}
+    assert labels == {task_id: expected_label for task_id, _, _, expected_label in source_fixtures}
+    assert overview is not None
+    assert overview.source_label == "capture.mp4"
+    assert all(locator not in page.model_dump_json() for locator in raw_locators)
+    assert all(locator not in overview.model_dump_json() for locator in raw_locators)
