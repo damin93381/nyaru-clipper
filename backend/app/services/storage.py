@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlmodel import Session
 
-from app.models import Artifact
+from app.models import Artifact, Task
 from app.paths import get_data_dir
 
 
@@ -79,5 +79,12 @@ def persist_artifact_metadata(
     )
     session.add(artifact)
     session.flush()
+    task = session.get(Task, task_id)
+    if task is not None:
+        task.storage_bytes = sum(
+            candidate.stat().st_size
+            for candidate in get_task_root(task_id).rglob("*")
+            if candidate.is_file()
+        )
     session.refresh(artifact)
     return artifact

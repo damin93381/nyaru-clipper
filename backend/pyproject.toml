@@ -5,6 +5,7 @@ description = "Minimal FastAPI backend scaffold for the Bilibili VTuber suite"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+  "alembic>=1.14.0,<2.0.0",
   "fastapi>=0.115.0,<1.0.0",
   "httpx>=0.28.0,<1.0.0",
   "orjson>=3.10.0,<4.0.0",

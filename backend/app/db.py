@@ -31,7 +31,9 @@ def reset_db_runtime() -> None:
 
 def init_db() -> None:
     from app import models  # noqa: F401
+    from app.db_migrations import upgrade_database
 
+    upgrade_database(get_database_url())
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
     _run_lightweight_schema_migrations(engine)
