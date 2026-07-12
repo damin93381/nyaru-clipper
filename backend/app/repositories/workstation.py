@@ -44,7 +44,9 @@ from app.services.storage import build_artifact_content_path, summarize_stage_lo
 
 MAX_PAGE_SIZE: Final = 100
 _LIKE_ESCAPE: Final = "\\"
-_WINDOWS_ABSOLUTE_PATH: Final = re.compile(r"^[A-Za-z]:[\\/]|^\\\\")
+_HOST_PATH_IN_TEXT: Final = re.compile(
+    r"(?<![:/\w])(?:/(?:[^\s\"'<>()[\]{},;!?]+)|[A-Za-z]:[\\/](?:[^\s\"'<>()[\]{},;!?]+)|\\\\(?:[^\s\"'<>()[\]{},;!?]+))"
+)
 _JSON_VALUE_ADAPTER: Final = TypeAdapter(JsonValue)
 _RECOVERY_ACTION_ADAPTER: Final = TypeAdapter(RecoveryAction)
 _EXPECTED_ARTIFACTS: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
@@ -302,7 +304,7 @@ def _stage_records(
         TaskStageOverview(
             name=stage.name,
             status="planned" if planned else stage.status,
-            summary=stage.summary,
+            summary=_sanitize_visible_text(stage.summary),
             failure_code=stage.failure_code,
             attempts=stage.attempts,
             started_at=stage.started_at,
@@ -317,16 +319,22 @@ def _execution_progress(progress: TaskExecutionProgress | None) -> ExecutionProg
     if progress is None:
         return None
     try:
-        decoded = json.loads(progress.phase_timings_json)
-    except json.JSONDecodeError:
-        decoded = []
-    phases = decoded if isinstance(decoded, list) else []
+        decoded = _JSON_VALUE_ADAPTER.validate_json(progress.phase_timings_json)
+    except ValidationError:
+        phases: list[dict[str, JsonValue]] = []
+    else:
+        sanitized = _redact_absolute_paths(decoded)
+        match sanitized:
+            case list():
+                phases = [item for item in sanitized if isinstance(item, dict)]
+            case _:
+                phases = []
     return ExecutionProgressOverview(
         stage_name=progress.stage_name,
         current_phase=progress.current_phase,
         phase_index=progress.phase_index,
         phase_count=progress.phase_count,
-        latest_message=progress.latest_message,
+        latest_message=_sanitize_visible_text(progress.latest_message),
         phase_started_at=progress.phase_started_at,
         heartbeat_at=progress.heartbeat_at,
         phases=phases,
@@ -395,7 +403,7 @@ def _redact_absolute_paths(value: JsonValue) -> JsonValue:
     """Recursively preserve JSON structure while replacing absolute path strings."""
     match value:
         case str():
-            return "[path]" if _is_absolute_path(value) else value
+            return _sanitize_visible_text(value)
         case list():
             return [_redact_absolute_paths(item) for item in value]
         case dict():
@@ -406,8 +414,11 @@ def _redact_absolute_paths(value: JsonValue) -> JsonValue:
             assert_never(unreachable)
 
 
-def _is_absolute_path(value: str) -> bool:
-    return value.startswith("/") or _WINDOWS_ABSOLUTE_PATH.match(value) is not None
+def _sanitize_visible_text(value: str | None) -> str | None:
+    """Redact cross-platform absolute host paths while preserving surrounding diagnostics."""
+    if value is None:
+        return None
+    return _HOST_PATH_IN_TEXT.sub("[path]", value)
 
 
 def _recovery_actions(
@@ -427,7 +438,9 @@ def _safe_logs(task_id: str, stages: Sequence[TaskStageOverview]) -> list[SafeLo
         SafeLogOverview(
             stage_name=stage.name,
             status=stage.status,
-            summary=_redact_log_summary(summarize_stage_log(task_id, stage.name) or stage.summary),
+            summary=_sanitize_visible_text(
+                _redact_log_summary(summarize_stage_log(task_id, stage.name) or stage.summary)
+            ),
             display_label=stage_display_label(stage.name),
         )
         for stage in stages

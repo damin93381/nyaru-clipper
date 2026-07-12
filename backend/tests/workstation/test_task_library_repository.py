@@ -332,3 +332,93 @@ def test_recovery_actions_are_discriminated_and_reject_unknown_identifiers(sessi
                 "success_behavior": "poll_task",
             }
         )
+
+
+def test_get_workstation_task_overview_redacts_host_paths_from_all_user_visible_text(
+    session: Session,
+) -> None:
+    # Given: host paths in every v2 overview text surface.
+    from app.models import Artifact, MediaSource, Task, TaskExecutionProgress, TaskStage
+    from app.repositories.workstation import get_workstation_task_overview
+    from app.services.storage import log_file_for_stage
+
+    task_id = "task-visible-paths"
+    raw_paths = [
+        "/home/operator/models/whisper.bin",
+        "/mnt/recordings/source.wav",
+        "/var/lib/nyaru/transcript.json",
+        "C:\\Users\\operator\\cache",
+        "D:\\exports\\clip.mp4",
+        "\\\\server\\share\\source.mp4",
+    ]
+    session.add(
+        Task(
+            id=task_id,
+            source_url="file:///fixtures/visible-paths.mp4",
+            normalized_source_url="file:///fixtures/visible-paths.mp4",
+            status="running",
+            title="Visible-path fixture",
+        )
+    )
+    session.add(MediaSource(task_id=task_id, kind="local", locator="file:///fixtures/visible-paths.mp4"))
+    session.add(
+        TaskStage(
+            task_id=task_id,
+            name="asr",
+            status="running",
+            summary=f"ASR loaded {raw_paths[0]} and {raw_paths[3]}; retryable diagnostic.",
+        )
+    )
+    session.add(
+        TaskExecutionProgress(
+            task_id=task_id,
+            stage_name="asr",
+            current_phase="transcribe",
+            phase_index=2,
+            phase_count=5,
+            latest_message=f"Reading {raw_paths[1]}; model remains available.",
+            phase_timings_json=json.dumps(
+                [
+                    {
+                        "message": f"Wrote {raw_paths[4]}",
+                        "nested": {"source": raw_paths[2], "share": raw_paths[5]},
+                        "diagnostic": "phase completed",
+                    }
+                ]
+            ),
+        )
+    )
+    session.add(
+        Artifact(
+            task_id=task_id,
+            stage_name="asr",
+            kind="transcript_json",
+            path="/var/lib/nyaru/tasks/task-visible-paths/work/transcript.json",
+            metadata_json=json.dumps({"paths": raw_paths}),
+        )
+    )
+    session.commit()
+    log_file_for_stage(task_id, "asr").write_text(
+        f"worker inspected {raw_paths[5]}; retryable diagnostic.\n",
+        encoding="utf-8",
+    )
+
+    # When: the v2 overview is serialized.
+    overview = get_workstation_task_overview(session, task_id)
+
+    # Then: all host paths are removed while useful non-path diagnostics remain.
+    assert overview is not None
+    assert overview.stages[0].summary == "ASR loaded [path] and [path]; retryable diagnostic."
+    assert overview.safe_logs[0].summary == "worker inspected [path]; retryable diagnostic."
+    assert overview.execution_progress is not None
+    assert overview.execution_progress.latest_message == "Reading [path]; model remains available."
+    assert overview.execution_progress.phases == [
+        {
+            "message": "Wrote [path]",
+            "nested": {"source": "[path]", "share": "[path]"},
+            "diagnostic": "phase completed",
+        }
+    ]
+    assert json.loads(overview.artifacts[0].metadata_json)["paths"] == ["[path]"] * len(raw_paths)
+    serialized_overview = overview.model_dump_json()
+    assert all(raw_path not in serialized_overview for raw_path in raw_paths)
