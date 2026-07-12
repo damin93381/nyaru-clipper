@@ -31,22 +31,30 @@ def serialize_recovery_actions(*, task_id: str, task_status: str, stages: list[T
         actions.append(
             {
                 "id": "download_asr_model",
-                "label": "Download missing ASR models",
-                "method": "POST",
-                "href": f"/api/tasks/{task_id}/asr/models/download",
-                "payload": {"model_keys": ["whisperx", "alignment"]},
+                "label_key": "download_asr_model",
+                "description_key": "download_asr_model",
                 "enabled": True,
+                "disabled_reason": None,
+                "method": "POST",
+                "endpoint": f"/api/tasks/{task_id}/asr/models/download",
+                "payload": {"model_keys": ["whisperx", "alignment"]},
+                "confirmation_required": False,
+                "success_behavior": "retry_stage_after_success",
             }
         )
 
     actions.append(
         {
             "id": "retry_stage",
-            "label": f"Retry {stage_display_label(failed_stage.name).lower()}",
-            "method": "POST",
-            "href": f"/api/tasks/{task_id}/retry",
-            "payload": {"stage_name": failed_stage.name},
+            "label_key": "retry_stage",
+            "description_key": "retry_stage",
             "enabled": True,
+            "disabled_reason": None,
+            "method": "POST",
+            "endpoint": f"/api/tasks/{task_id}/retry",
+            "payload": {"stage_name": failed_stage.name},
+            "confirmation_required": False,
+            "success_behavior": "poll_task",
         }
     )
     return actions

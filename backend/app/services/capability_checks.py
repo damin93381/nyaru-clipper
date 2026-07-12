@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
+import importlib.util
 from shutil import which
 
 from app.services.runtime_diagnostics import derive_runtime_diagnostics
@@ -14,6 +16,17 @@ def _which(binary: str) -> str | None:
 
 def _import_module(module_name: str):
     return importlib.import_module(module_name)
+
+
+def _find_module_spec(module_name: str):
+    return importlib.util.find_spec(module_name)
+
+
+def _read_distribution_version(distribution_name: str) -> str | None:
+    try:
+        return importlib.metadata.version(distribution_name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def _dependency_warning_message(*, dependency_name: str, module_name: str, error: Exception | None = None) -> str:
@@ -70,6 +83,27 @@ def _build_python_checks() -> tuple[dict[str, dict[str, str | bool | None]], lis
     has_error = False
 
     for dependency_name, module_name in module_names.items():
+        if dependency_name == "whisperx_diarization":
+            if _find_module_spec(module_name) is None:
+                payload[dependency_name] = {
+                    "available": False,
+                    "module": module_name,
+                    "status": "warning",
+                    "version": None,
+                }
+                warnings.append(
+                    _dependency_warning_message(dependency_name=dependency_name, module_name=module_name)
+                )
+                continue
+
+            payload[dependency_name] = {
+                "available": True,
+                "module": module_name,
+                "status": "ok",
+                "version": _read_distribution_version("pyannote.audio"),
+            }
+            continue
+
         try:
             module = _import_module(module_name)
         except ModuleNotFoundError:

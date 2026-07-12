@@ -425,6 +425,22 @@ Docker 回退验证：
 ./scripts/export_backend_requirements.sh --check
 ```
 
+修改后端任务状态、恢复逻辑或 Web 任务详情行为后，建议执行的开发者回归检查：
+
+```bash
+uv run --project backend pytest
+pnpm --dir web test --run
+pnpm --dir web build
+pnpm --dir web exec playwright test --reporter=line
+./scripts/export_backend_requirements.sh --check
+```
+
+如果本机已经有 Vite dev server 占用 `5173` 端口，请在执行 Playwright 时取消 `CI` 环境变量，让 `web/playwright.config.ts` 复用现有服务：
+
+```bash
+env -u CI pnpm --dir web exec playwright test --reporter=line
+```
+
 运行时能力快速检查：
 
 ```bash

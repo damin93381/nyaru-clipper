@@ -26,4 +26,4 @@ The deployment guides are the fastest way to reach the supported local and self-
 
 The English and Chinese manuals are kept as parallel document sets so operators and users can work in either language without losing MVP scope fidelity.
 
-The operator and deployment guides now also document the current ASR lifecycle observability contract, including active phase timing visibility, `cancel_requested` overlay behavior, and the narrower `force-kill` availability rules.
+The operator and deployment guides now also document the current ASR lifecycle observability contract, including active phase timing visibility, `cancel_requested` overlay behavior, the narrower `force-kill` availability rules, worker execution-token boundaries for stage updates, and the developer regression commands for backend/frontend task-state changes.

@@ -196,6 +196,15 @@ The canonical backend stage order is:
 
 In the current MVP, pipeline `export` is intentionally marked as skipped until the user confirms a clip through `POST /api/tasks/{task_id}/clips`.
 
+### Stage status updates and execution context
+
+Stage status updates have two operating modes:
+
+- normal service or API calls can update a task stage without a worker execution context
+- worker-bound pipeline execution validates the current execution token before updating stage state
+
+This boundary lets user-triggered actions such as confirmed clip export and report generation persist their stage results outside the worker loop, while still protecting live worker runs from stale execution tokens after cancellation, force-kill, or stale-job recovery.
+
 ## ASR lifecycle visibility and cancellation semantics
 
 During an active `asr` stage, task detail can expose an optional `execution_progress` object.

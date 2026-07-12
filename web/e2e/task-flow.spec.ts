@@ -372,11 +372,14 @@ test("renders the translation-failed detail state with deterministic evidence fi
     });
   });
 
-  await page.goto(`/tasks/${taskId}`);
+	await page.goto(`/tasks/${taskId}`);
 
-  await expect(page.getByRole("heading", { level: 2, name: `任务 ${taskId}` })).toBeVisible();
-  await expect(page.getByText("翻译阶段失败")).toBeVisible();
-  await expect(page.getByText("可从 翻译 重新尝试。上游已成功阶段保持不变，下游阶段继续等待。")).toBeVisible();
+	await expect(page.getByRole("heading", { level: 2, name: `任务 ${taskId}` })).toBeVisible();
+	const failurePanel = page.locator(".panel").filter({
+		has: page.getByRole("heading", { level: 3, name: "处理失败" }),
+	});
+	await expect(failurePanel.getByText("翻译失败", { exact: true })).toBeVisible();
+	await expect(failurePanel.getByText("可从 翻译 重新尝试。上游已成功阶段保持不变，下游阶段继续等待。")).toBeVisible();
   await expect(page.getByText(/bilingual_transcript_json/i)).toBeVisible();
   await expect(page.getByText(/fixture-translator/i)).toBeVisible();
   await expect(page.getByText(/seg-fail-0001/i)).toBeVisible();

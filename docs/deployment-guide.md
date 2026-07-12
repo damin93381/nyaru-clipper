@@ -425,6 +425,22 @@ Backend requirements artifact:
 ./scripts/export_backend_requirements.sh --check
 ```
 
+Developer regression checks after changing backend task state, recovery, or web task-detail behavior:
+
+```bash
+uv run --project backend pytest
+pnpm --dir web test --run
+pnpm --dir web build
+pnpm --dir web exec playwright test --reporter=line
+./scripts/export_backend_requirements.sh --check
+```
+
+If a local Vite dev server is already using port `5173`, run Playwright with `CI` unset so `web/playwright.config.ts` can reuse the existing server:
+
+```bash
+env -u CI pnpm --dir web exec playwright test --reporter=line
+```
+
 Quick capability contract check:
 
 ```bash

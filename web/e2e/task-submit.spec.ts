@@ -92,9 +92,9 @@ test("submits a task and lands on the canonical detail page @happy", async ({ pa
   await page.getByTestId("task-url-input").fill("https://www.bilibili.com/video/BV1xx411c7mD");
   await page.getByTestId("task-submit-button").click();
 
-  await expect(page).toHaveURL(/\/tasks\/task-happy123$/);
-  await expect(page.getByRole("heading", { level: 2, name: "任务 task-happy123" })).toBeVisible();
-  await expect(page.getByText("运行中")).toBeVisible();
+	await expect(page).toHaveURL(/\/tasks\/task-happy123$/);
+	await expect(page.getByRole("heading", { level: 2, name: "任务 task-happy123" })).toBeVisible();
+	await expect(page.getByRole("heading", { level: 3, name: "正在处理" })).toBeVisible();
 
   for (const stageName of stageHeadings) {
     await expect(page.getByRole("heading", { level: 4, name: stageName })).toBeVisible();

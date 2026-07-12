@@ -536,9 +536,13 @@ def _apply_process_group_control(
 
 
 def set_stage_status(
-    session: Session, *, task_id: str, stage_name: str, status: str, summary: str
+    session: Session, *, task_id: str, stage_name: str, status: str, summary: str, failure_code: str | None = None
 ) -> None:
-    _task_control_module().ensure_current_execution_context(session, task_id=task_id)
+    task_control = _task_control_module()
+    get_execution_context = getattr(task_control, "get_execution_context", None)
+    context = get_execution_context(session) if get_execution_context is not None else None
+    if context is not None:
+        task_control.ensure_current_execution_context(session, task_id=task_id)
     stage = session.exec(
         select(models.TaskStage)
         .where(models.TaskStage.task_id == task_id)
@@ -550,6 +554,10 @@ def set_stage_status(
     now = models.utc_now()
     stage.status = status
     stage.summary = summary
+    if status == "failed":
+        stage.failure_code = failure_code
+    else:
+        stage.failure_code = None
     stage.updated_at = now
     if status == "success":
         stage.finished_at = now

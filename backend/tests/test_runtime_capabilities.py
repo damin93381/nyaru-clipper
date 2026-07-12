@@ -309,11 +309,10 @@ def test_get_runtime_capabilities_returns_stable_json_serializable_warning_paylo
             "transformers": SimpleNamespace(__version__="4.52.0"),
             "whisperx": SimpleNamespace(__version__="3.3.1"),
         }
-        if module_name == "pyannote.audio":
-            raise ModuleNotFoundError("No module named 'pyannote.audio'")
         return available[module_name]
 
     monkeypatch.setattr("app.services.capability_checks._import_module", _fake_import_module)
+    monkeypatch.setattr("app.services.capability_checks._find_module_spec", lambda module_name: None)
 
     payload = get_runtime_capabilities()
 

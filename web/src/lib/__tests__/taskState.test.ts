@@ -172,6 +172,39 @@ describe("classifyTaskState", () => {
       action: "retry_stage",
     },
     {
+      label: "failed task with retry action wins over artifact missing",
+      task: task("failed", {
+        failure_code: "unknown_failure",
+        recovery_actions: [
+          {
+            id: "retry_stage",
+            label: "Retry translation",
+            label_key: "retry_stage",
+            description_key: "retry_stage",
+            enabled: true,
+            disabled_reason: null,
+            method: "POST",
+            endpoint: "/api/tasks/task-state123/retry",
+            href: "/api/tasks/task-state123/retry",
+            payload: { stage_name: "translation" },
+            confirmation_required: false,
+            success_behavior: "poll_task",
+          },
+        ],
+        stages: stagesWith({
+          ingest: { status: "success", attempts: 1 },
+          media_prep: { status: "success", attempts: 1 },
+          asr: { status: "success", attempts: 1 },
+          translation: { status: "failed", attempts: 2, failure_code: "unknown_failure" },
+        }),
+        artifact_readiness: [
+          { kind: "translated_segments", stage_name: "translation", status: "missing", artifact_id: null, path: null },
+        ],
+      }),
+      state: "failed_retryable",
+      action: "retry_stage",
+    },
+    {
       label: "artifact failed",
       task: task("failed", {
         failure_code: "unknown_failure",

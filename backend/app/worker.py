@@ -111,6 +111,7 @@ def _mark_job_stale_failed(session, job: TaskJob) -> None:
     if stage is not None:
         stage.status = "failed"
         stage.summary = "Recovered stale running job"
+        stage.failure_code = "stale_job_recovered"
         stage.finished_at = now
         stage.updated_at = now
         session.add(stage)

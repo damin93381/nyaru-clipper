@@ -256,6 +256,80 @@ def test_oom_is_classified(backend_env, monkeypatch) -> None:
     assert stage_summary == "oom"
 
 
+def test_rocm_cuda_request_falls_back_to_cpu_float32(backend_env, monkeypatch) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1rocmfallback001")
+    _prepare_audio_fixture(Path(backend_env["data_dir"]), task_id)
+    monkeypatch.setenv("APP_WHISPERX_DEVICE", "cuda")
+    monkeypatch.setenv("APP_WHISPERX_COMPUTE_TYPE", "float16")
+
+    observed: dict[str, object] = {}
+
+    class _FallbackWhisperX(_FakeWhisperX):
+        def load_model(self, model_name: str, device: str, *, compute_type: str, download_root: str | None = None):
+            observed["load_model_device"] = device
+            observed["load_model_compute_type"] = compute_type
+            return _FakeModel(self.transcription_result)
+
+        def load_align_model(
+            self,
+            *,
+            language_code: str,
+            device: str,
+            model_name: str | None = None,
+            model_dir: str | None = None,
+            model_cache_only: bool = False,
+        ):
+            observed["align_device"] = device
+            return super().load_align_model(
+                language_code=language_code,
+                device=device,
+                model_name=model_name,
+                model_dir=model_dir,
+                model_cache_only=model_cache_only,
+            )
+
+    fake_whisperx = _FallbackWhisperX(
+        transcription_result={"segments": [{"start": 0.0, "end": 1.0, "text": "你好"}]},
+        aligned_result={"segments": [{"start": 0.0, "end": 1.0, "text": "你好", "words": []}]},
+    )
+
+    class _FakeCTranslate2:
+        @staticmethod
+        def get_supported_compute_types(device: str):
+            if device == "cuda":
+                raise RuntimeError("CUDA failed with error CUDA driver version is insufficient for CUDA runtime version")
+            assert device == "cpu"
+            return {"float32", "int8", "int8_float32"}
+
+    monkeypatch.setattr("app.services.asr_whisperx._load_whisperx_module", lambda: fake_whisperx)
+    monkeypatch.setattr("app.services.asr_whisperx._load_ctranslate2_module", lambda: _FakeCTranslate2())
+    monkeypatch.setattr(
+        "app.services.asr_whisperx.detect_runtime_profile",
+        lambda: {
+            "detected_profile": "wsl-rocm",
+            "accelerator": {"torch_build_family": "rocm"},
+            "platform": {"is_wsl": True},
+        },
+    )
+
+    from app.db import session_scope
+    from app.services.asr_whisperx import transcribe_task_audio
+
+    with session_scope() as session:
+        result = transcribe_task_audio(session, task_id)
+
+    assert observed == {
+        "load_model_device": "cpu",
+        "load_model_compute_type": "float32",
+        "align_device": "cpu",
+    }
+    assert result.model_metadata["device"] == "cpu"
+    assert result.model_metadata["compute_type"] == "float32"
+    assert result.model_metadata["requested_device"] == "cuda"
+    assert result.model_metadata["requested_compute_type"] == "float16"
+    assert "runtime_warning" in result.model_metadata
+
+
 def test_alignment_failure_is_classified(backend_env, monkeypatch) -> None:
     task_id = _create_task("https://www.bilibili.com/video/BV1ds411c7mU")
     _prepare_audio_fixture(Path(backend_env["data_dir"]), task_id)

@@ -312,11 +312,15 @@ def test_task_detail_exposes_failure_code_and_recovery_actions(
     assert generic_body["recovery_actions"] == [
         {
             "id": "retry_stage",
-            "label": "Retry translation",
-            "method": "POST",
-            "href": f"/api/tasks/{generic_task_id}/retry",
-            "payload": {"stage_name": "translation"},
+            "label_key": "retry_stage",
+            "description_key": "retry_stage",
             "enabled": True,
+            "disabled_reason": None,
+            "method": "POST",
+            "endpoint": f"/api/tasks/{generic_task_id}/retry",
+            "payload": {"stage_name": "translation"},
+            "confirmation_required": False,
+            "success_behavior": "poll_task",
         }
     ]
     assert generic_body["artifact_readiness"] == [
@@ -330,7 +334,7 @@ def test_task_detail_exposes_failure_code_and_recovery_actions(
         {
             "stage_name": "media_prep",
             "kind": "prepared_audio",
-            "status": "not_ready",
+            "status": "missing",
             "artifact_id": None,
             "path": None,
         },
@@ -371,11 +375,15 @@ def test_task_detail_exposes_failure_code_and_recovery_actions(
     assert [action["id"] for action in asr_body["recovery_actions"]] == ["download_asr_model", "retry_stage"]
     assert asr_body["recovery_actions"][0] == {
         "id": "download_asr_model",
-        "label": "Download missing ASR models",
-        "method": "POST",
-        "href": f"/api/tasks/{asr_task_id}/asr/models/download",
-        "payload": {"model_keys": ["whisperx", "alignment"]},
+        "label_key": "download_asr_model",
+        "description_key": "download_asr_model",
         "enabled": True,
+        "disabled_reason": None,
+        "method": "POST",
+        "endpoint": f"/api/tasks/{asr_task_id}/asr/models/download",
+        "payload": {"model_keys": ["whisperx", "alignment"]},
+        "confirmation_required": False,
+        "success_behavior": "retry_stage_after_success",
     }
 
     cancelled_response = client.post(

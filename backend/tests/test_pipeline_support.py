@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, SQLModel, select
 
 
 def _reset_runtime_state() -> None:
@@ -206,6 +206,33 @@ def _normalize_comparable_datetime(value):
     if value.tzinfo is None:
         return value
     return value.replace(tzinfo=None)
+
+
+def test_set_stage_status_allows_direct_service_update_without_execution_context(backend_env) -> None:
+    task_id = _create_task(source_url="https://www.bilibili.com/video/BV1directstatus001")
+
+    from app.db import session_scope
+    from app.models import TaskStage
+    from app.services.pipeline_support import set_stage_status
+
+    with session_scope() as session:
+        set_stage_status(
+            session,
+            task_id=task_id,
+            stage_name="ingest",
+            status="success",
+            summary="direct service update",
+        )
+        stage = session.exec(
+            select(TaskStage)
+            .where(TaskStage.task_id == task_id)
+            .where(TaskStage.name == "ingest")
+        ).one()
+        stage_status = stage.status
+        stage_summary = stage.summary
+
+    assert stage_status == "success"
+    assert stage_summary == "direct service update"
 
 
 def _load_control(task_id: str):

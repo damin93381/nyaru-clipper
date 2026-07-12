@@ -196,6 +196,15 @@ worker 会一次领取一个待处理的持久化任务。
 
 在当前 MVP 中，流水线内的 `export` 阶段会先被标记为 `skipped`，直到用户通过 `POST /api/tasks/{task_id}/clips` 确认导出某个切片。
 
+### 阶段状态更新与执行上下文
+
+阶段状态更新分成两种运行模式：
+
+- 普通 service 或 API 调用可以在没有 worker 执行上下文的情况下更新任务阶段
+- worker 绑定的流水线执行在更新阶段状态前，会校验当前 execution token
+
+这个边界允许用户触发的操作，例如确认切片导出和报告生成，在 worker 循环之外持久化阶段结果；同时仍然保护活动中的 worker 运行，避免取消、force-kill 或 stale job 恢复之后的旧 execution token 继续写入状态。
+
 ## ASR 生命周期可见性与取消语义
 
 当任务处于活动中的 `asr` 阶段时，任务详情里可以出现一个可选的 `execution_progress` 对象。

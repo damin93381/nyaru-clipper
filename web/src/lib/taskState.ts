@@ -157,9 +157,16 @@ export function classifyTaskState(input: TaskStateInput): TaskState {
   }
 
   const blockingReadiness = firstBlockingReadiness(input.artifact_readiness);
-  if (blockingReadiness?.status === "failed" && !hasEnabledAction(input, "retry_stage", failedStage)) {
-    return "artifact_failed";
+  if (input.status === "failed") {
+    if (hasEnabledAction(input, "retry_stage", failedStage)) {
+      return "failed_retryable";
+    }
+    if (blockingReadiness?.status === "failed") {
+      return "artifact_failed";
+    }
+    return "failed_terminal";
   }
+
   if (blockingReadiness?.status === "missing") {
     return "artifact_missing";
   }
@@ -169,13 +176,6 @@ export function classifyTaskState(input: TaskStateInput): TaskState {
 
   if (hasPendingLog(input)) {
     return "log_not_ready";
-  }
-
-  if (input.status === "failed") {
-    if (failedStage && hasEnabledAction(input, "retry_stage", failedStage)) {
-      return "failed_retryable";
-    }
-    return "failed_terminal";
   }
 
   if (hasActiveStage(input)) {

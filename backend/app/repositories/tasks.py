@@ -145,7 +145,7 @@ def _artifact_readiness_status(stage: TaskStage, *, artifact: Artifact | None) -
         return "ready"
     if stage.status == "failed":
         return "failed"
-    if stage.status == "success" and stage.name == "asr":
+    if stage.status == "success":
         return "missing"
     return "not_ready"
 

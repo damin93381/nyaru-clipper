@@ -183,7 +183,7 @@ Wave 4: E2E/regression verification and docs/copy cleanup.
 
   **Commit**: YES | Message: `test(api): lock status recovery contracts` | Files: [`backend/tests/test_tasks_api.py`, `backend/tests/test_retry_api.py`, `backend/tests/test_retry_resume.py`]
 
-- [ ] 2. Backend Contract Implementation and Lightweight Schema Migration
+- [x] 2. Backend Contract Implementation and Lightweight Schema Migration
 
   **What to do**: Implement the tests from Task 1. Add `TaskStage.failure_code: str | None`. Add a startup-safe SQLite migration helper because `create_all` will not add columns to existing DBs. Centralize failure-code mapping, recovery action serialization, artifact readiness, log readiness, and log/path sanitization.
   **Must NOT do**: Do not change canonical stage names. Do not remove `summary`. Do not alter retry semantics. Do not expose raw paths as primary UI labels.
@@ -230,7 +230,7 @@ Wave 4: E2E/regression verification and docs/copy cleanup.
 
   **Commit**: YES | Message: `feat(api): add structured recovery contracts` | Files: [`backend/app/models.py`, `backend/app/db.py`, `backend/app/repositories/tasks.py`, `backend/app/services/task_runner.py`, `backend/app/services/asr_whisperx.py`, `backend/app/services/storage.py`, `backend/tests/*`]
 
-- [ ] 3. Frontend Contract Types, API Tests, and State Helpers
+- [x] 3. Frontend Contract Types, API Tests, and State Helpers
 
   **What to do**: Update frontend contract mirrors in `web/src/lib/types.ts` and API tests. Add a focused helper module for task/stage/workspace state classification, using backend fields instead of summary string parsing. Add centralized copy keys for recovery actions and readiness states.
   **Must NOT do**: Do not implement page rendering in this task. Do not add an i18n framework. Do not parse raw failure summaries for state decisions.
@@ -273,7 +273,7 @@ Wave 4: E2E/regression verification and docs/copy cleanup.
 
   **Commit**: YES | Message: `feat(web): add status recovery contracts` | Files: [`web/src/lib/types.ts`, `web/src/lib/api.ts`, `web/src/lib/copy/*.ts`, `web/src/lib/__tests__/*`]
 
-- [ ] 4. Task Detail Status, Failure, Recovery, and Safe Log UI
+- [x] 4. Task Detail Status, Failure, Recovery, and Safe Log UI
 
   **What to do**: Redesign `TaskDetailPage` status presentation around the helper from Task 3. Show distinct panels for queued/running/failed/recoverable/cancelled/not found. Add retry/download actions from backend `recovery_actions`. Replace raw log path as the primary display with `display_label` and `safe_summary`; keep technical details in a disclosure section.
   **Must NOT do**: Do not add task history route. Do not invent frontend-only recovery actions that backend does not expose. Do not hide critical failure information behind nested accordions.
@@ -317,7 +317,7 @@ Wave 4: E2E/regression verification and docs/copy cleanup.
 
   **Commit**: YES | Message: `feat(web): clarify task failure recovery` | Files: [`web/src/pages/TaskDetailPage.tsx`, `web/src/pages/__tests__/TaskDetailPage.test.tsx`, `web/src/lib/copy/taskDetail.ts`, `web/src/styles.css`]
 
-- [ ] 5. Workspace Artifact States and Export Validation
+- [x] 5. Workspace Artifact States and Export Validation
 
   **What to do**: Update `WorkspacePage` to distinguish artifact query loading, backend not-ready/missing/failed readiness, load errors, and true empty data. Add client-side validation for export start/end seconds before calling `/clips`. Surface backend export errors as field/form errors without clearing user input.
   **Must NOT do**: Do not require generated artifacts from a real pipeline in tests. Do not treat query error as empty state. Do not clear edited clip times after failed export.
@@ -362,7 +362,7 @@ Wave 4: E2E/regression verification and docs/copy cleanup.
 
   **Commit**: YES | Message: `feat(web): clarify workspace readiness states` | Files: [`web/src/pages/WorkspacePage.tsx`, `web/src/pages/__tests__/WorkspacePage.test.tsx`, `web/src/lib/copy/workspace.ts`, `web/src/styles.css`]
 
-- [ ] 6. Deterministic Playwright Journeys and Release Verification
+- [x] 6. Deterministic Playwright Journeys and Release Verification
 
   **What to do**: Add/extend Playwright specs using mocked API route fixtures for failed ASR missing model, generic failed retryable stage, artifact not ready, artifact missing, artifact load error, invalid export range, and task not found. Add stable `data-testid` only where role/text selectors are insufficient.
   **Must NOT do**: Do not depend on dev backend state, real downloads, GPU, or network outside Playwright route fixtures. Do not add brittle selectors based on CSS class names.
@@ -412,10 +412,10 @@ Wave 4: E2E/regression verification and docs/copy cleanup.
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 > **Never mark F1-F4 as checked before getting user's okay.** Rejection or user feedback -> fix -> re-run -> present again -> wait for okay.
-- [ ] F1. Plan Compliance Audit — oracle
-- [ ] F2. Code Quality Review — unspecified-high
-- [ ] F3. Real Manual QA — unspecified-high (+ playwright)
-- [ ] F4. Scope Fidelity Check — deep
+- [x] F1. Plan Compliance Audit — oracle
+- [x] F2. Code Quality Review — unspecified-high
+- [x] F3. Real Manual QA — unspecified-high (+ playwright)
+- [x] F4. Scope Fidelity Check — deep
 
 ## Commit Strategy
 - One commit per task using the specified commit messages.
