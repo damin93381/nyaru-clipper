@@ -1,52 +1,82 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import inspect, text
-from sqlmodel import Session, select
+from sqlalchemy import text
+from sqlmodel import Session, create_engine, select
 
-from app.models import Task
+from app.models import Task, utc_now
 from app.services.storage import get_tasks_root
 
 
+@dataclass(frozen=True, slots=True)
+class WorkstationMetadataBackfillError(OSError):
+    """Identifies managed task directories that could not be read during backfill."""
+
+    task_ids: tuple[str, ...]
+
+    def __str__(self) -> str:
+        return f"Unable to backfill metadata for: {', '.join(self.task_ids)}"
+
+
 def upgrade_database(database_url: str | None = None) -> None:
-    """Upgrade a database to the workstation schema and backfill its metadata once."""
+    """Upgrade a database and complete any pending metadata backfill."""
     from app.db import get_database_url
-    from sqlmodel import create_engine
 
     resolved_url = database_url or get_database_url()
-    engine = create_engine(resolved_url, connect_args={"check_same_thread": False})
-    inspector = inspect(engine)
-    is_initial_upgrade = "alembic_version" not in inspector.get_table_names()
-    if not is_initial_upgrade:
-        with engine.connect() as connection:
-            is_initial_upgrade = connection.execute(
-                text("SELECT version_num FROM alembic_version")
-            ).scalar_one_or_none() is None
-    engine.dispose()
-
     backend_dir = Path(__file__).resolve().parents[1]
     config = Config(str(backend_dir / "alembic.ini"))
     config.set_main_option("sqlalchemy.url", resolved_url)
     command.upgrade(config, "head")
 
-    if is_initial_upgrade:
-        metadata_engine = create_engine(resolved_url, connect_args={"check_same_thread": False})
-        with Session(metadata_engine) as session:
-            backfill_workstation_metadata(session, get_tasks_root())
+    if _metadata_backfill_is_pending(resolved_url):
+        _run_pending_metadata_backfill(resolved_url)
+
+
+def _metadata_backfill_is_pending(database_url: str) -> bool:
+    engine = create_engine(database_url, connect_args={"check_same_thread": False})
+    with engine.connect() as connection:
+        completed_at = connection.execute(
+            text("SELECT completed_at FROM workstation_metadata_backfill WHERE id = 1")
+        ).scalar_one()
+    engine.dispose()
+    return completed_at is None
+
+
+def _run_pending_metadata_backfill(database_url: str) -> None:
+    engine = create_engine(database_url, connect_args={"check_same_thread": False})
+    try:
+        with Session(engine) as session:
+            try:
+                backfill_workstation_metadata(session, get_tasks_root())
+            except WorkstationMetadataBackfillError:
+                session.commit()
+                raise
+            session.execute(
+                text("UPDATE workstation_metadata_backfill SET completed_at = :completed_at WHERE id = 1"),
+                {"completed_at": utc_now()},
+            )
             session.commit()
-        metadata_engine.dispose()
+    finally:
+        engine.dispose()
 
 
 def backfill_workstation_metadata(session: Session, tasks_root: Path) -> None:
     """Derive task titles and managed-directory storage totals for existing tasks."""
+    failed_task_ids: list[str] = []
     for task in session.exec(select(Task)).all():
-        task_root = tasks_root / task.id
-        task.title = _task_title(task, task_root)
-        task.storage_bytes = _directory_size(task_root)
+        try:
+            task_root = tasks_root / task.id
+            task.title = _task_title(task, task_root)
+            task.storage_bytes = _directory_size(task_root)
+        except OSError:
+            failed_task_ids.append(task.id)
+    if failed_task_ids:
+        raise WorkstationMetadataBackfillError(tuple(failed_task_ids))
 
 
 def _task_title(task: Task, task_root: Path) -> str:

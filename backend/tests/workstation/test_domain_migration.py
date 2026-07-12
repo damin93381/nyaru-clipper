@@ -4,7 +4,8 @@ import json
 import sqlite3
 from pathlib import Path
 
-from sqlmodel import Session, select
+import pytest
+from sqlmodel import Field, SQLModel, Session, select
 
 
 def _create_legacy_database(db_path: Path, task_id: str) -> None:
@@ -217,3 +218,120 @@ def test_persist_artifact_metadata_recomputes_task_storage_bytes(tmp_path: Path,
 
     assert task is not None
     assert task.storage_bytes == artifact_path.stat().st_size
+
+
+def test_upgrade_database_does_not_create_future_metadata_tables(tmp_path: Path, monkeypatch) -> None:
+    # Given: a legacy database and an unrelated model registered after this revision.
+    database_path = tmp_path / "task-state.sqlite3"
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("APP_DATABASE_URL", f"sqlite:///{database_path}")
+    _create_legacy_database(database_path, "task-future")
+
+    class FutureOnlyTable(SQLModel, table=True):
+        __tablename__ = "future_only_table"
+
+        id: int | None = Field(default=None, primary_key=True)
+
+    # When: this revision upgrades the legacy database.
+    from app.db_migrations import upgrade_database
+
+    try:
+        upgrade_database(f"sqlite:///{database_path}")
+        with sqlite3.connect(database_path) as connection:
+            table_names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        SQLModel.metadata.remove(FutureOnlyTable.__table__)
+
+    # Then: only this revision's schema is created.
+    assert "future_only_table" not in table_names
+
+
+def test_upgrade_database_retries_metadata_backfill_after_a_failed_startup(tmp_path: Path, monkeypatch) -> None:
+    # Given: a legacy database whose first metadata backfill fails.
+    database_path = tmp_path / "task-state.sqlite3"
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("APP_DATABASE_URL", f"sqlite:///{database_path}")
+    task_id = "task-retry"
+    _create_legacy_database(database_path, task_id)
+    from app import db_migrations
+
+    original_backfill = db_migrations.backfill_workstation_metadata
+    attempts = 0
+
+    def fail_once(session: Session, tasks_root: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("temporary read failure")
+        original_backfill(session, tasks_root)
+
+    monkeypatch.setattr(db_migrations, "backfill_workstation_metadata", fail_once)
+
+    # When: startup is retried after the first backfill error.
+    with pytest.raises(OSError, match="temporary read failure"):
+        db_migrations.upgrade_database(f"sqlite:///{database_path}")
+    db_migrations.upgrade_database(f"sqlite:///{database_path}")
+    db_migrations.upgrade_database(f"sqlite:///{database_path}")
+
+    # Then: the durable completion state causes the second startup to retry it.
+    assert attempts == 2
+
+
+def test_metadata_backfill_commits_other_tasks_when_one_directory_is_unreadable(tmp_path: Path, monkeypatch) -> None:
+    # Given: two legacy tasks and a filesystem failure for the first task directory.
+    database_path = tmp_path / "task-state.sqlite3"
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("APP_DATABASE_URL", f"sqlite:///{database_path}")
+    blocked_task_id = "task-blocked"
+    healthy_task_id = "task-healthy"
+    _create_legacy_database(database_path, blocked_task_id)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO task (
+                id, source_url, normalized_source_url, source_video_id, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                healthy_task_id,
+                "https://www.bilibili.com/video/BV1healthy001",
+                "https://www.bilibili.com/video/BV1healthy001",
+                "BV1healthy001",
+                "success",
+                "2026-07-12T00:02:00+00:00",
+                "2026-07-12T00:03:00+00:00",
+            ),
+        )
+    healthy_metadata = tmp_path / "data" / "tasks" / healthy_task_id / "raw" / "source-metadata.json"
+    healthy_metadata.parent.mkdir(parents=True)
+    healthy_metadata.write_text(json.dumps({"title": "Healthy Fixture Stream"}), encoding="utf-8")
+    from app import db_migrations
+
+    original_directory_size = db_migrations._directory_size
+
+    def fail_blocked_directory(task_root: Path) -> int:
+        if task_root.name == blocked_task_id:
+            raise OSError("permission denied")
+        return original_directory_size(task_root)
+
+    monkeypatch.setattr(db_migrations, "_directory_size", fail_blocked_directory)
+
+    # When: metadata backfill encounters that one directory.
+    with pytest.raises(db_migrations.WorkstationMetadataBackfillError):
+        db_migrations.upgrade_database(f"sqlite:///{database_path}")
+
+    # Then: healthy metadata is committed and the durable marker remains pending.
+    from app.db import get_engine, reset_db_runtime
+    from app.models import Task
+
+    reset_db_runtime()
+    with Session(get_engine()) as session:
+        healthy_task = session.get(Task, healthy_task_id)
+    with sqlite3.connect(database_path) as connection:
+        completed_at = connection.execute(
+            "SELECT completed_at FROM workstation_metadata_backfill WHERE id = 1"
+        ).fetchone()
+
+    assert healthy_task is not None
+    assert healthy_task.title == "Healthy Fixture Stream"
+    assert completed_at == (None,)

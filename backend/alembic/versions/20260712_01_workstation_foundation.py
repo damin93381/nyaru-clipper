@@ -6,9 +6,10 @@ Create Date: 2026-07-12 00:00:00
 """
 from __future__ import annotations
 
+# allow: SIZE_OK — immutable explicit Alembic baseline schema declaration.
 from alembic import op
-from sqlalchemy import Column, DateTime, Integer, String, inspect, text
-from sqlmodel import SQLModel, Session, select
+import sqlalchemy as sa
+from sqlmodel import Session, select
 
 from app.models import (
     CANONICAL_STAGES,
@@ -31,29 +32,25 @@ depends_on = None
 def upgrade() -> None:
     """Create the workstation projection without replacing legacy task rows."""
     bind = op.get_bind()
-    SQLModel.metadata.create_all(bind)
-    table_names = set(inspect(bind).get_table_names())
-    task_columns = {column["name"] for column in inspect(bind).get_columns("task")}
-    if "title" not in task_columns:
-        op.add_column("task", Column("title", String(), nullable=True))
-    if "archived_at" not in task_columns:
-        op.add_column("task", Column("archived_at", DateTime(timezone=True), nullable=True))
-    if "storage_bytes" not in task_columns:
-        op.add_column(
-            "task",
-            Column("storage_bytes", Integer(), nullable=False, server_default="0"),
-        )
+    table_names = set(sa.inspect(bind).get_table_names())
+    if "task" not in table_names:
+        _create_task_table()
+    else:
+        _add_task_columns(bind)
     if "taskstage" in table_names:
-        stage_columns = {column["name"] for column in inspect(bind).get_columns("taskstage")}
-        if "failure_code" not in stage_columns:
-            op.add_column("taskstage", Column("failure_code", String(), nullable=True))
+        _add_failure_code_column(bind)
 
+    _create_workstation_tables()
     _create_task_search(bind)
     _backfill_workstation_records(bind)
 
 
 def downgrade() -> None:
-    """Remove only additive workstation structures."""
+    """Remove the new tables while preserving additive legacy-table columns.
+
+    The task and taskstage columns stay in place to avoid destructive SQLite table
+    rebuilds during a rollback after users have written workstation metadata.
+    """
     bind = op.get_bind()
     if bind.dialect.name == "sqlite":
         for trigger_name in (
@@ -64,24 +61,173 @@ def downgrade() -> None:
             "task_search_source_insert",
             "task_search_source_update",
         ):
-            bind.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
-        bind.execute(text("DROP TABLE IF EXISTS task_search"))
-    for table_name in ("stagerun", "pipelinerun", "queueentry", "queuestate", "tasktaglink", "tasktag", "mediasource"):
-        bind.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+            bind.execute(sa.text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+        bind.execute(sa.text("DROP TABLE IF EXISTS task_search"))
+    for table_name in (
+        "workstation_metadata_backfill",
+        "stagerun",
+        "pipelinerun",
+        "queueentry",
+        "queuestate",
+        "tasktaglink",
+        "tasktag",
+        "mediasource",
+    ):
+        bind.execute(sa.text(f"DROP TABLE IF EXISTS {table_name}"))
+
+
+def _create_task_table() -> None:
+    op.create_table(
+        "task",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("source_url", sa.String(), nullable=False),
+        sa.Column("normalized_source_url", sa.String(), nullable=False),
+        sa.Column("source_video_id", sa.String(), nullable=True),
+        sa.Column("status", sa.String(), nullable=False, server_default="pending"),
+        sa.Column("title", sa.String(), nullable=True),
+        sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("storage_bytes", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_task_normalized_source_url", "task", ["normalized_source_url"])
+    op.create_index("ix_task_source_video_id", "task", ["source_video_id"])
+    op.create_index("ix_task_status", "task", ["status"])
+
+
+def _add_task_columns(bind) -> None:
+    task_columns = {column["name"] for column in sa.inspect(bind).get_columns("task")}
+    if "title" not in task_columns:
+        op.add_column("task", sa.Column("title", sa.String(), nullable=True))
+    if "archived_at" not in task_columns:
+        op.add_column("task", sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True))
+    if "storage_bytes" not in task_columns:
+        op.add_column(
+            "task",
+            sa.Column("storage_bytes", sa.Integer(), nullable=False, server_default="0"),
+        )
+
+
+def _add_failure_code_column(bind) -> None:
+    stage_columns = {column["name"] for column in sa.inspect(bind).get_columns("taskstage")}
+    if "failure_code" not in stage_columns:
+        op.add_column("taskstage", sa.Column("failure_code", sa.String(), nullable=True))
+
+
+def _create_workstation_tables() -> None:
+    op.create_table(
+        "mediasource",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("task_id", sa.String(), nullable=False),
+        sa.Column("kind", sa.String(), nullable=False),
+        sa.Column("locator", sa.String(), nullable=False),
+        sa.Column("display_name", sa.String(), nullable=True),
+        sa.Column("source_video_id", sa.String(), nullable=True),
+        sa.Column("import_mode", sa.String(), nullable=False, server_default="managed"),
+        sa.Column("metadata_json", sa.String(), nullable=False, server_default="{}"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["task_id"], ["task.id"]),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("task_id", name="uq_mediasource_task_id"),
+    )
+    op.create_index("ix_mediasource_task_id", "mediasource", ["task_id"])
+    op.create_index("ix_mediasource_kind", "mediasource", ["kind"])
+    op.create_index("ix_mediasource_source_video_id", "mediasource", ["source_video_id"])
+
+    op.create_table(
+        "tasktag",
+        sa.Column("name", sa.String(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("name"),
+    )
+    op.create_table(
+        "tasktaglink",
+        sa.Column("task_id", sa.String(), nullable=False),
+        sa.Column("tag_name", sa.String(), nullable=False),
+        sa.ForeignKeyConstraint(["tag_name"], ["tasktag.name"]),
+        sa.ForeignKeyConstraint(["task_id"], ["task.id"]),
+        sa.PrimaryKeyConstraint("task_id", "tag_name"),
+        sa.UniqueConstraint("task_id", "tag_name", name="uq_tasktaglink_task_tag"),
+    )
+
+    op.create_table(
+        "queuestate",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("revision", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "queueentry",
+        sa.Column("task_id", sa.String(), nullable=False),
+        sa.Column("position", sa.Integer(), nullable=False),
+        sa.Column("priority", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("state", sa.String(), nullable=False, server_default="queued"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["task_id"], ["task.id"]),
+        sa.PrimaryKeyConstraint("task_id"),
+    )
+    op.create_index("ix_queueentry_position", "queueentry", ["position"])
+    op.create_index("ix_queueentry_priority", "queueentry", ["priority"])
+    op.create_index("ix_queueentry_state", "queueentry", ["state"])
+
+    op.create_table(
+        "pipelinerun",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("task_id", sa.String(), nullable=False),
+        sa.Column("status", sa.String(), nullable=False),
+        sa.Column("trigger", sa.String(), nullable=False, server_default="create"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(["task_id"], ["task.id"]),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_pipelinerun_task_id", "pipelinerun", ["task_id"])
+    op.create_index("ix_pipelinerun_status", "pipelinerun", ["status"])
+
+    op.create_table(
+        "stagerun",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("run_id", sa.String(), nullable=False),
+        sa.Column("name", sa.String(), nullable=False),
+        sa.Column("status", sa.String(), nullable=False),
+        sa.Column("summary", sa.String(), nullable=True),
+        sa.Column("failure_code", sa.String(), nullable=True),
+        sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(["run_id"], ["pipelinerun.id"]),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_stagerun_run_id", "stagerun", ["run_id"])
+    op.create_index("ix_stagerun_name", "stagerun", ["name"])
+    op.create_index("ix_stagerun_status", "stagerun", ["status"])
+    op.create_index("ix_stagerun_failure_code", "stagerun", ["failure_code"])
+
+    op.create_table(
+        "workstation_metadata_backfill",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.execute(sa.text("INSERT INTO workstation_metadata_backfill (id) VALUES (1)"))
 
 
 def _create_task_search(bind) -> None:
     if bind.dialect.name != "sqlite":
         return
     bind.execute(
-        text(
+        sa.text(
             "CREATE VIRTUAL TABLE IF NOT EXISTS task_search "
             "USING fts5(task_id UNINDEXED, title, source_identity)"
         )
     )
-    bind.execute(text("DELETE FROM task_search"))
+    bind.execute(sa.text("DELETE FROM task_search"))
     bind.execute(
-        text(
+        sa.text(
             "INSERT INTO task_search (task_id, title, source_identity) "
             "SELECT id, COALESCE(title, ''), source_url FROM task"
         )
@@ -132,7 +278,7 @@ def _create_search_triggers(bind) -> None:
         """,
     }
     for statement in trigger_sql.values():
-        bind.execute(text(statement))
+        bind.execute(sa.text(statement))
 
 
 def _backfill_workstation_records(bind) -> None:
@@ -162,13 +308,7 @@ def _backfill_task_projection(session: Session, task: Task, position: int) -> No
                 queue_state = "queued"
             case _:
                 queue_state = "finished"
-        session.add(
-            QueueEntry(
-                task_id=task.id,
-                position=position,
-                state=queue_state,
-            )
-        )
+        session.add(QueueEntry(task_id=task.id, position=position, state=queue_state))
     run_id = f"legacy:{task.id}"
     if session.get(PipelineRun, run_id) is None:
         session.add(
