@@ -26,6 +26,7 @@ from app.services.recovery_actions import serialize_recovery_actions, stage_disp
 from app.services.storage import build_artifact_content_path, ensure_task_dirs, summarize_stage_log
 
 BV_PATTERN = re.compile(r"(BV[0-9A-Za-z]+)", re.IGNORECASE)
+_BV_PATH_COMPONENT_PATTERN = re.compile(r"BV[0-9A-Za-z]+", re.IGNORECASE)
 RETRYABLE_LEGACY_STAGE_STATUSES = frozenset({"failed", "cancelled"})
 
 
@@ -45,6 +46,32 @@ def normalize_source_url(source_url: str) -> tuple[str, str | None]:
     parsed = urlparse(source_url)
     normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.scheme and parsed.netloc else source_url
     return normalized.rstrip("/"), None
+
+
+def normalize_bilibili_source_url(source_url: str) -> tuple[str, str]:
+    """Normalize only the supported Bilibili long and BV-bearing short URL forms."""
+    parsed = urlparse(source_url)
+    hostname = parsed.hostname.casefold() if parsed.hostname else ""
+    path_parts = [part for part in parsed.path.split("/") if part]
+    video_id = _bilibili_video_id(hostname, path_parts)
+    if video_id is None:
+        raise ValueError("Unsupported Bilibili source URL")
+    return f"https://www.bilibili.com/video/{video_id}", video_id
+
+
+def _bilibili_video_id(hostname: str, path_parts: list[str]) -> str | None:
+    """Extract a BV identifier only from supported Bilibili URL path shapes."""
+    if hostname == "bilibili.com" or hostname.endswith(".bilibili.com"):
+        if len(path_parts) < 2 or path_parts[0].casefold() != "video":
+            return None
+        candidate = path_parts[1]
+    elif hostname == "b23.tv":
+        if not path_parts:
+            return None
+        candidate = path_parts[0]
+    else:
+        return None
+    return candidate if _BV_PATH_COMPONENT_PATTERN.fullmatch(candidate) else None
 
 
 def _serialize_stage(stage: TaskStage) -> dict[str, Any]:

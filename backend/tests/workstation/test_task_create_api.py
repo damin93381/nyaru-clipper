@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import subprocess
+
 from fastapi.testclient import TestClient
 import pytest
 from sqlmodel import select
@@ -26,6 +30,7 @@ def client(tmp_path, monkeypatch) -> TestClient:
     from app.main import app
 
     with TestClient(app) as test_client:
+        test_client.local_root = local_root  # type: ignore[attr-defined]
         yield test_client
 
 
@@ -105,8 +110,11 @@ def test_v2_task_creation_revalidates_local_source_before_persisting_reference(c
         assert source.import_mode == "reference"
 
 
-def test_v2_local_reference_task_runs_ingest_without_bilibili_download(client: TestClient, monkeypatch) -> None:
-    # Given: a local task selected through the trusted catalog and non-ingest stages that complete in-process.
+def test_v2_local_reference_task_keeps_trusted_root_paths_out_of_persisted_and_returned_data(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    # Given: a local task selected through the trusted catalog, with media tools that disclose their input path.
     payload = {
         "source": {
             "kind": "local",
@@ -128,11 +136,26 @@ def test_v2_local_reference_task_runs_ingest_without_bilibili_download(client: T
     def complete_remaining_stage(session, current_task_id: str) -> None:
         assert current_task_id == task_id
 
+    def run_media_command(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        if args[0] == "ffprobe":
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps({"format": {"filename": str(client.local_root / "vod" / "example.mp4"), "duration": "42"}}),
+                stderr="",
+            )
+        if args[0] == "ffmpeg":
+            output_path = Path(args[-1])
+            output_path.write_bytes(b"wav")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {args}")
+
     executors = dict(task_runner.STAGE_EXECUTORS)
-    for stage_name in ("media_prep", "asr", "translation", "highlight", "export", "report"):
+    for stage_name in ("asr", "translation", "highlight", "export"):
         executors[stage_name] = complete_remaining_stage
     monkeypatch.setattr(task_runner, "download_bilibili_vod", downloader_must_not_run)
     monkeypatch.setattr(task_runner, "STAGE_EXECUTORS", executors)
+    monkeypatch.setattr("app.services.pipeline_support.subprocess.run", run_media_command)
 
     # When: the canonical runner processes the local-reference task.
     from app.db import session_scope
@@ -140,10 +163,31 @@ def test_v2_local_reference_task_runs_ingest_without_bilibili_download(client: T
     with session_scope() as session:
         result = task_runner.run_task_pipeline(session, task_id)
 
-    # Then: ingest uses the server-side catalog reference and the pipeline can progress to completion.
+    # Then: runtime resolution remains server-side while stored and returned data retain only the opaque reference.
     assert create_response.status_code == 201
     assert result.final_status == "success"
     assert result.completed_stages == ["ingest", "media_prep", "asr", "translation", "highlight", "export", "report"]
+
+    trusted_root = str(client.local_root)  # type: ignore[attr-defined]
+    from app.db import session_scope
+    from app.models import Artifact
+
+    with session_scope() as session:
+        artifacts = session.exec(select(Artifact).where(Artifact.task_id == task_id)).all()
+        report = next(artifact for artifact in artifacts if artifact.kind == "task_report_markdown")
+        report_path = report.path
+        persisted_artifact_data = "\n".join(f"{artifact.path}\n{artifact.metadata_json}" for artifact in artifacts)
+
+    report_text = Path(report_path).read_text(encoding="utf-8")
+    api_artifacts = client.get(f"/api/tasks/{task_id}/artifacts")
+    v2_overview = client.get(f"/api/v2/tasks/{task_id}")
+    logs = client.get(f"/api/tasks/{task_id}/logs")
+
+    assert trusted_root not in persisted_artifact_data
+    assert trusted_root not in report_text
+    assert trusted_root not in api_artifacts.text
+    assert trusted_root not in v2_overview.text
+    assert trusted_root not in logs.text
 
 
 def test_v2_task_creation_rejects_non_url_bilibili_source_string(client: TestClient) -> None:
@@ -159,3 +203,19 @@ def test_v2_task_creation_rejects_non_url_bilibili_source_string(client: TestCli
 
     # Then: v2 applies the same URL-boundary validation as inspect and v1 creation.
     assert response.status_code == 422
+
+
+def test_v2_task_creation_rejects_bv_identifier_on_an_untrusted_host(client: TestClient) -> None:
+    # Given: an arbitrary HTTPS host with a BV-shaped path segment.
+    payload = {
+        "source": {"kind": "bilibili", "url": "https://example.invalid/BV1abc"},
+        "profile_id": "standard",
+        "priority": 0,
+    }
+
+    # When: the task source crosses the v2 creation boundary.
+    response = client.post("/api/v2/tasks", json=payload)
+
+    # Then: creation rejects it instead of normalizing the attacker-controlled host into Bilibili.
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported Bilibili source URL"

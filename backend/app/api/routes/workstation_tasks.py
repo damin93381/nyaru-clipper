@@ -18,7 +18,7 @@ from app.repositories.workstation import (
     get_workstation_task_overview,
     list_workstation_tasks,
 )
-from app.repositories.tasks import normalize_source_url
+from app.repositories.tasks import normalize_bilibili_source_url
 from app.services.source_catalog import SourceCatalogError, resolve_local_media_source
 from app.services.storage import ensure_task_dirs
 from app.services.task_library_lifecycle import (
@@ -227,9 +227,7 @@ def _create_workstation_task(session: Session, payload: CreateWorkstationTaskReq
 def _task_source(task_id: str, source: TaskSource) -> tuple[str, str, str | None, MediaSource]:
     match source:
         case BilibiliTaskSource(url=url):
-            normalized_url, source_video_id = normalize_source_url(str(url))
-            if source_video_id is None:
-                raise ValueError("Bilibili source URL must contain a BV video identifier")
+            normalized_url, source_video_id = normalize_bilibili_source_url(str(url))
             media_source = MediaSource(
                 task_id=task_id,
                 kind="bilibili",

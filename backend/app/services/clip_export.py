@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from app.models import Artifact, ClipCandidate
 from app.repositories.tasks import get_task_record
 from app.services.pipeline_support import run_logged_command, set_stage_status
+from app.services.source_catalog import resolve_local_reference_artifact
 from app.services.storage import ensure_task_dirs, log_file_for_stage, persist_artifact_metadata
 from app.settings import get_settings
 
@@ -48,6 +49,7 @@ def export_confirmed_clip(
         raise LookupError(f"Clip candidate {candidate_id} not found for task {task_id}")
 
     source_video_path = _resolve_source_video_path(task_id, record)
+    source_reference = _source_video_reference(record, source_video_path)
     source_duration_s = _resolve_source_duration_seconds(task_id, record)
     clip_start_s = float(candidate.start_seconds if start_s is None else start_s)
     clip_end_s = float(candidate.end_seconds if end_s is None else end_s)
@@ -72,11 +74,15 @@ def export_confirmed_clip(
         "aac",
         str(output_path),
     ]
-    ffmpeg_result = run_logged_command(ffmpeg_args, log_path=log_path)
+    redactions = {str(source_video_path): source_reference} if source_reference != str(source_video_path) else None
+    ffmpeg_result = run_logged_command(ffmpeg_args, log_path=log_path, redactions=redactions)
     if ffmpeg_result.returncode != 0 or not output_path.exists():
         set_stage_status(session, task_id=task_id, stage_name="export", status="failed", summary="ffmpeg_failed")
         session.commit()
-        raise ClipExportFailure(code="ffmpeg_failed", message=ffmpeg_result.stderr or "ffmpeg failed during clip export")
+        raise ClipExportFailure(
+            code="ffmpeg_failed",
+            message=_safe_source_error(ffmpeg_result.stderr or "ffmpeg failed during clip export", source_video_path, source_reference),
+        )
 
     artifact = _persist_export_artifact(
         session,
@@ -86,7 +92,7 @@ def export_confirmed_clip(
         start_s=clip_start_s,
         end_s=clip_end_s,
         source_duration_s=source_duration_s,
-        source_video_path=source_video_path,
+        source_video_reference=source_reference,
     )
     candidate.status = "exported"
     session.add(candidate)
@@ -116,6 +122,9 @@ def _resolve_source_video_path(task_id: str, record) -> Path:
 
     for artifact in reversed(record.artifacts):
         if artifact.stage_name == "ingest" and artifact.kind == "source_video":
+            local_source = resolve_local_reference_artifact(artifact.metadata_json)
+            if local_source is not None:
+                return local_source.path
             candidate = Path(artifact.path)
             if candidate.exists():
                 return candidate
@@ -124,6 +133,22 @@ def _resolve_source_video_path(task_id: str, record) -> Path:
     if raw_files:
         return raw_files[0]
     raise ClipExportFailure(code="missing_input", message="Clip export requires a downloaded source video before export can run.")
+
+
+def _source_video_reference(record, source_video_path: Path) -> str:
+    """Return a local source locator for durable metadata, or the managed artifact path otherwise."""
+    for artifact in reversed(record.artifacts):
+        if artifact.stage_name != "ingest" or artifact.kind != "source_video":
+            continue
+        local_source = resolve_local_reference_artifact(artifact.metadata_json)
+        if local_source is not None:
+            return local_source.locator
+    return str(source_video_path)
+
+
+def _safe_source_error(message: str, source_video_path: Path, source_reference: str) -> str:
+    """Prevent a subprocess diagnostic from disclosing a trusted local reference path."""
+    return message.replace(str(source_video_path), source_reference)
 
 
 def _resolve_source_duration_seconds(task_id: str, record) -> float:
@@ -194,7 +219,7 @@ def _persist_export_artifact(
     start_s: float,
     end_s: float,
     source_duration_s: float,
-    source_video_path: Path,
+    source_video_reference: str,
 ) -> Artifact:
     existing = session.exec(
         select(Artifact)
@@ -208,7 +233,7 @@ def _persist_export_artifact(
         "start_s": start_s,
         "end_s": end_s,
         "source_duration_s": source_duration_s,
-        "source_video_path": str(source_video_path),
+        "source_video_path": source_video_reference,
         "filename": output_path.name,
     }
     if existing is not None:

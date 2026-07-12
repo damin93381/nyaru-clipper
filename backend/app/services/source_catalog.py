@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from app.repositories.tasks import normalize_source_url
+from app.repositories.tasks import normalize_bilibili_source_url
 from app.services.downloader import _normalize_metadata
 from app.settings import get_settings
 
@@ -63,6 +63,11 @@ class LocalMediaSource:
     root_id: str
     relative_path: str
     path: Path
+
+    @property
+    def locator(self) -> str:
+        """Return the opaque local reference that is safe to persist or display."""
+        return f"local://{self.root_id}/{self.relative_path}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,11 +130,23 @@ def resolve_persisted_local_media_source(metadata_json: str) -> LocalMediaSource
     return resolve_local_media_source(root_id, relative_path)
 
 
+def resolve_local_reference_artifact(metadata_json: str) -> LocalMediaSource | None:
+    """Resolve a local-reference artifact only when its server-authored metadata marks it as such."""
+    try:
+        metadata = json.loads(metadata_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(metadata, dict) or metadata.get("import_mode") != "reference":
+        return None
+    return resolve_persisted_local_media_source(metadata_json)
+
+
 def inspect_bilibili_source(url: str) -> SourceInspection:
     """Normalize and inspect one Bilibili URL through the downloader metadata boundary."""
-    normalized_url, source_video_id = normalize_source_url(url)
-    if source_video_id is None:
-        raise SourceCatalogError("Bilibili source URL must contain a BV video identifier")
+    try:
+        normalized_url, source_video_id = normalize_bilibili_source_url(url)
+    except ValueError as exc:
+        raise SourceCatalogError(str(exc)) from exc
     settings = get_settings()
     stdout = run_bilibili_inspection_command(
         [settings.ytdlp_binary, "--dump-single-json", "--no-download", normalized_url]

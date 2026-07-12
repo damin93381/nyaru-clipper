@@ -23,7 +23,7 @@ from app.services.highlights import analyze_task_highlights
 from app.services.media_prep import prepare_media_for_asr
 from app.services.pipeline_support import append_stage_log, run_tracked_structured_process_group_command
 from app.services.reporting import generate_task_report
-from app.services.source_catalog import resolve_persisted_local_media_source
+from app.services.source_catalog import resolve_local_reference_artifact, resolve_persisted_local_media_source
 from app.services.storage import ensure_task_dirs, log_file_for_stage, persist_artifact_metadata
 from app.services.task_control import (
     StaleExecutionTokenError,
@@ -67,12 +67,17 @@ def _execute_ingest(session: Session, task_id: str):
     media_source = session.exec(select(MediaSource).where(MediaSource.task_id == task_id)).first()
     if media_source is not None and media_source.kind == "local" and media_source.import_mode == "reference":
         local_source = resolve_persisted_local_media_source(media_source.metadata_json)
+        reference_path = ensure_task_dirs(task_id)["raw"] / "local-reference.json"
+        reference_path.write_text(
+            media_source.metadata_json,
+            encoding="utf-8",
+        )
         persist_artifact_metadata(
             session,
             task_id=task_id,
             stage_name="ingest",
             kind="source_video",
-            path=local_source.path,
+            path=reference_path,
             metadata={
                 "import_mode": "reference",
                 "relative_path": local_source.relative_path,
@@ -113,6 +118,9 @@ def _resolve_ingest_video_path(task_id: str, session: Session) -> Path:
 
     for artifact in reversed(record.artifacts):
         if artifact.stage_name == "ingest" and artifact.kind == "source_video":
+            local_source = resolve_local_reference_artifact(artifact.metadata_json)
+            if local_source is not None:
+                return local_source.path
             candidate = Path(artifact.path)
             if candidate.exists():
                 return candidate
@@ -124,7 +132,23 @@ def _resolve_ingest_video_path(task_id: str, session: Session) -> Path:
 
 
 def _execute_media_prep(session: Session, task_id: str):
-    return prepare_media_for_asr(session, task_id, _resolve_ingest_video_path(task_id, session))
+    record = get_task_record(session, task_id)
+    if record is None:
+        raise ValueError(f"Unknown task_id: {task_id}")
+    source_video_path = _resolve_ingest_video_path(task_id, session)
+    source_locator = _local_source_locator(record)
+    return prepare_media_for_asr(session, task_id, source_video_path, source_locator=source_locator)
+
+
+def _local_source_locator(record) -> str | None:
+    """Return an opaque locator for local references without exposing their resolved path."""
+    for artifact in reversed(record.artifacts):
+        if artifact.stage_name != "ingest" or artifact.kind != "source_video":
+            continue
+        local_source = resolve_local_reference_artifact(artifact.metadata_json)
+        if local_source is not None:
+            return local_source.locator
+    return None
 
 
 @dataclass

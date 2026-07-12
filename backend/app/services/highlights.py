@@ -19,6 +19,7 @@ from app.services.highlight_scoring import (
 )
 from app.services.pipeline_support import append_stage_log, set_stage_status
 from app.services.scene_detection import SceneDetectionProvider, build_scene_detection_provider
+from app.services.source_catalog import resolve_local_reference_artifact
 from app.services.storage import ensure_task_dirs, log_file_for_stage, persist_artifact_metadata
 from app.services.subtitles import SubtitleSegment, SubtitleWord
 
@@ -256,24 +257,26 @@ def _detect_or_derive_scene_boundaries(
     task_dirs = ensure_task_dirs(task_id)
     detected_scene_windows: list[SceneWindow] = []
     source_video_path: Path | None = None
+    source_reference: str | None = None
     provider_metadata: dict[str, object] = {}
     fallback_reason: str | None = None
 
     try:
         source_video_path = _resolve_source_video_path(task_id, record)
+        source_reference = _source_video_reference(record, source_video_path)
         provider = scene_detection_provider or build_scene_detection_provider()
         provider_metadata = dict(provider.metadata)
-        append_stage_log(log_path, f"scene_detection_input={source_video_path}")
+        append_stage_log(log_path, f"scene_detection_input={source_reference}")
         append_stage_log(log_path, f"scene_detection_provider={provider_metadata.get('provider')}")
         detected_scene_windows = provider.detect_scenes(source_video_path)
     except Exception as exc:
-        fallback_reason = str(exc).strip() or exc.__class__.__name__
+        fallback_reason = _safe_source_text(str(exc).strip() or exc.__class__.__name__, source_video_path, source_reference)
     else:
         if detected_scene_windows:
             scene_path = _write_scene_artifact(
                 task_dirs["work"] / "scene-boundaries.json",
                 source="pyscenedetect",
-                source_video_path=source_video_path,
+                source_video_reference=source_reference,
                 scene_windows=detected_scene_windows,
                 provider_metadata=provider_metadata,
                 fallback_reason=None,
@@ -281,7 +284,7 @@ def _detect_or_derive_scene_boundaries(
             metadata = {
                 "scene_count": len(detected_scene_windows),
                 "provider_metadata": provider_metadata,
-                "source_video_path": str(source_video_path),
+                "source_video_path": source_reference,
             }
             persist_artifact_metadata(
                 session,
@@ -305,7 +308,7 @@ def _detect_or_derive_scene_boundaries(
     fallback_path = _write_scene_artifact(
         task_dirs["work"] / "scene-like-boundaries.json",
         source="subtitle_gap_fallback",
-        source_video_path=source_video_path,
+        source_video_reference=source_reference,
         scene_windows=fallback_scene_windows,
         provider_metadata=provider_metadata,
         fallback_reason=fallback_reason,
@@ -313,7 +316,7 @@ def _detect_or_derive_scene_boundaries(
     fallback_metadata = {
         "scene_count": len(fallback_scene_windows),
         "provider_metadata": provider_metadata,
-        "source_video_path": str(source_video_path) if source_video_path is not None else None,
+        "source_video_path": source_reference,
         "fallback_reason": fallback_reason,
     }
     persist_artifact_metadata(
@@ -340,6 +343,9 @@ def _resolve_source_video_path(task_id: str, record) -> Path:
 
     for artifact in reversed(record.artifacts):
         if artifact.stage_name == "ingest" and artifact.kind == "source_video":
+            local_source = resolve_local_reference_artifact(artifact.metadata_json)
+            if local_source is not None:
+                return local_source.path
             candidate = Path(artifact.path)
             if candidate.exists():
                 return candidate
@@ -348,6 +354,24 @@ def _resolve_source_video_path(task_id: str, record) -> Path:
     if raw_files:
         return raw_files[0]
     raise FileNotFoundError("Source video artifact is missing for scene detection.")
+
+
+def _source_video_reference(record, source_video_path: Path) -> str:
+    """Use an opaque local locator in artifacts and logs while retaining a runtime path for processing."""
+    for artifact in reversed(record.artifacts):
+        if artifact.stage_name != "ingest" or artifact.kind != "source_video":
+            continue
+        local_source = resolve_local_reference_artifact(artifact.metadata_json)
+        if local_source is not None:
+            return local_source.locator
+    return str(source_video_path)
+
+
+def _safe_source_text(value: str, source_video_path: Path | None, source_reference: str | None) -> str:
+    """Replace a runtime-only local path in diagnostics before they become durable metadata or logs."""
+    if source_video_path is None or source_reference is None:
+        return value
+    return value.replace(str(source_video_path), source_reference)
 
 
 def _scene_artifact_kind_for_path(record, scene_path: Path) -> str | None:
@@ -488,14 +512,14 @@ def _write_scene_artifact(
     output_path: Path,
     *,
     source: str,
-    source_video_path: Path | None,
+    source_video_reference: str | None,
     scene_windows: list[SceneWindow],
     provider_metadata: dict[str, object],
     fallback_reason: str | None,
 ) -> Path:
     payload = {
         "source": source,
-        "source_video_path": str(source_video_path) if source_video_path is not None else None,
+        "source_video_path": source_video_reference,
         "provider_metadata": provider_metadata,
         "fallback_reason": fallback_reason,
         "scene_count": len(scene_windows),

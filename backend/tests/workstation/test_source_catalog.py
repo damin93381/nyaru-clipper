@@ -72,28 +72,58 @@ def test_local_catalog_rejects_paths_outside_trusted_root(client: TestClient, re
     assert response.status_code == 400
 
 
-def test_bilibili_inspection_normalizes_metadata_without_live_network(client: TestClient, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("url", "source_video_id"),
+    [
+        ("https://www.bilibili.com/video/BV1abc/?from=search", "BV1abc"),
+        ("https://b23.tv/BV1short", "BV1short"),
+    ],
+)
+def test_bilibili_inspection_normalizes_supported_urls_without_live_network(
+    client: TestClient,
+    monkeypatch,
+    url: str,
+    source_video_id: str,
+) -> None:
     # Given: the inspection subprocess returns downloader-shaped metadata without a network call.
     monkeypatch.setattr(
         "app.services.source_catalog.run_bilibili_inspection_command",
         lambda command: '{"title":"Nyaru stream","uploader":"Nyaru","duration":42}',
     )
 
-    # When: a Bilibili video URL is inspected.
+    # When: a supported long or short Bilibili URL is inspected.
     response = client.post(
         "/api/v2/sources/bilibili/inspect",
-        json={"url": "https://www.bilibili.com/video/BV1abc/?from=search"},
+        json={"url": url},
     )
 
     # Then: normalized, safe source metadata is returned.
     assert response.status_code == 200
     assert response.json() == {
-        "normalized_url": "https://www.bilibili.com/video/BV1abc",
-        "source_video_id": "BV1abc",
+        "normalized_url": f"https://www.bilibili.com/video/{source_video_id}",
+        "source_video_id": source_video_id,
         "title": "Nyaru stream",
         "uploader": "Nyaru",
         "duration_seconds": 42.0,
     }
+
+
+def test_bilibili_inspection_rejects_bv_identifier_on_an_untrusted_host(client: TestClient, monkeypatch) -> None:
+    # Given: a non-Bilibili URL whose path contains a BV-shaped identifier.
+    monkeypatch.setattr(
+        "app.services.source_catalog.run_bilibili_inspection_command",
+        lambda command: (_ for _ in ()).throw(AssertionError("untrusted hosts must not invoke yt-dlp")),
+    )
+
+    # When: source inspection receives the hostile URL.
+    response = client.post(
+        "/api/v2/sources/bilibili/inspect",
+        json={"url": "https://example.invalid/BV1abc"},
+    )
+
+    # Then: the URL is rejected before metadata inspection.
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported Bilibili source URL"
 
 
 def test_bilibili_inspection_uses_bounded_subprocess_timeout(client: TestClient, monkeypatch) -> None:

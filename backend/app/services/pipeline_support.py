@@ -57,13 +57,26 @@ def append_stage_log(log_path: Path, message: str) -> None:
         handle.write(f"{message}\n")
 
 
-def run_logged_command(args: list[str], *, log_path: Path) -> subprocess.CompletedProcess[str]:
-    append_stage_log(log_path, f"$ {' '.join(args)}")
+def run_logged_command(
+    args: list[str],
+    *,
+    log_path: Path,
+    redactions: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command while replacing sensitive runtime-only paths before persistence."""
+    def redact(message: str) -> str:
+        if redactions is None:
+            return message
+        for source_path, safe_locator in redactions.items():
+            message = message.replace(source_path, safe_locator)
+        return message
+
+    append_stage_log(log_path, redact(f"$ {' '.join(args)}"))
     result = subprocess.run(args, capture_output=True, text=True, check=False)
     if result.stdout:
-        append_stage_log(log_path, result.stdout.rstrip())
+        append_stage_log(log_path, redact(result.stdout.rstrip()))
     if result.stderr:
-        append_stage_log(log_path, result.stderr.rstrip())
+        append_stage_log(log_path, redact(result.stderr.rstrip()))
     append_stage_log(log_path, f"exit_code={result.returncode}")
     return result
 
