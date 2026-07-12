@@ -133,8 +133,8 @@ def get_workstation_task_overview(session: Session, task_id: str) -> TaskOvervie
     pipeline_run = session.exec(
         select(PipelineRun)
         .where(PipelineRun.task_id == task_id)
-        .where(PipelineRun.started_at.is_not(None))
-        .order_by(PipelineRun.started_at.desc(), PipelineRun.id.desc())
+        .where(or_(PipelineRun.status == "pending", PipelineRun.started_at.is_not(None)))
+        .order_by(case((PipelineRun.status == "pending", 0), else_=1), PipelineRun.created_at.desc(), PipelineRun.id.desc())
     ).first()
     legacy_stages = session.exec(
         select(TaskStage).where(TaskStage.task_id == task_id).order_by(TaskStage.id)

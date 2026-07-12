@@ -497,3 +497,59 @@ def test_worker_queue_claim_updates_legacy_job_and_finishes_queue_entry(backend_
     assert queue_entry_state == "finished"
     assert job_status == "success"
     assert run_status == "success"
+
+
+def test_stale_recovery_finalizes_a_running_pipeline_run(backend_env, monkeypatch) -> None:
+    stale_task_id = _create_task("https://www.bilibili.com/video/BV1stalepipeline001")
+    pending_task_id = _create_task("https://www.bilibili.com/video/BV1pendingpipeline001")
+
+    from app.db import session_scope
+    from app.models import PipelineRun, StageRun, Task, TaskJob, TaskStage, utc_now
+    from app.worker import claim_next_job
+
+    stale_now = utc_now() - timedelta(minutes=10)
+    monkeypatch.setenv("APP_WORKER_RUNNING_JOB_STALE_SECONDS", "60")
+
+    with session_scope() as session:
+        task = session.get(Task, stale_task_id)
+        assert task is not None
+        task.status = "running"
+        task.updated_at = stale_now
+        session.add(task)
+
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == stale_task_id)).one()
+        job.status = "running"
+        job.updated_at = stale_now
+        session.add(job)
+
+        stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == stale_task_id).where(TaskStage.name == "ingest")
+        ).one()
+        stage.status = "running"
+        stage.started_at = stale_now
+        stage.updated_at = stale_now
+        session.add(stage)
+
+        run = session.exec(select(PipelineRun).where(PipelineRun.task_id == stale_task_id)).one()
+        run.status = "running"
+        run.started_at = stale_now
+        run.finished_at = None
+        session.add(run)
+        session.add(StageRun(run_id=run.id, name="ingest", status="running", started_at=stale_now))
+
+    claimed = claim_next_job()
+
+    assert claimed is not None
+    assert claimed.task_id == pending_task_id
+    with session_scope() as session:
+        run = session.exec(select(PipelineRun).where(PipelineRun.task_id == stale_task_id)).one()
+        stage_run = session.exec(select(StageRun).where(StageRun.run_id == run.id).where(StageRun.name == "ingest")).one()
+        run_status = run.status
+        run_finished_at = run.finished_at
+        stage_run_status = stage_run.status
+        stage_run_finished_at = stage_run.finished_at
+
+    assert run_status == "failed"
+    assert run_finished_at is not None
+    assert stage_run_status == "failed"
+    assert stage_run_finished_at is not None

@@ -165,6 +165,7 @@ def test_task_library_bulk_delete_removes_all_task_owned_database_rows(client: T
         MediaSource,
         PipelineRun,
         QueueEntry,
+        QueueState,
         StageRun,
         Task,
         TaskExecutionControl,
@@ -179,6 +180,7 @@ def test_task_library_bulk_delete_removes_all_task_owned_database_rows(client: T
     deleted_run_id = "run-delete"
     with session_scope() as session:
         _seed_task(session, task_id=deleted_task_id, status="success")
+        _seed_task(session, task_id="task-retained", status="success")
         _seed_task(session, task_id="task-running", status="running")
         session.add(TaskTag(name="delete-tag"))
         session.add_all(
@@ -197,6 +199,7 @@ def test_task_library_bulk_delete_removes_all_task_owned_database_rows(client: T
                 TaskExecutionControl(task_id=deleted_task_id),
                 TaskTagLink(task_id=deleted_task_id, tag_name="delete-tag"),
                 QueueEntry(task_id=deleted_task_id, position=1),
+                QueueEntry(task_id="task-retained", position=9),
                 PipelineRun(id=deleted_run_id, task_id=deleted_task_id, status="success"),
                 StageRun(run_id=deleted_run_id, name="asr", status="success"),
             ]
@@ -227,5 +230,11 @@ def test_task_library_bulk_delete_removes_all_task_owned_database_rows(client: T
         assert session.exec(select(MediaSource).where(MediaSource.task_id == deleted_task_id)).all() == []
         assert session.exec(select(TaskTagLink).where(TaskTagLink.task_id == deleted_task_id)).all() == []
         assert session.exec(select(QueueEntry).where(QueueEntry.task_id == deleted_task_id)).all() == []
+        queue_state = session.get(QueueState, 1)
+        retained_entry = session.get(QueueEntry, "task-retained")
         assert session.exec(select(PipelineRun).where(PipelineRun.task_id == deleted_task_id)).all() == []
         assert session.exec(select(StageRun).where(StageRun.run_id == deleted_run_id)).all() == []
+        assert queue_state is not None
+        assert queue_state.revision == 2
+        assert retained_entry is not None
+        assert retained_entry.position == 1

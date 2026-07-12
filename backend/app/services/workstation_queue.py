@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal
 
 from sqlalchemy import text
 from sqlmodel import Session, select
@@ -12,6 +12,7 @@ from app.models import QueueEntry, QueueState, utc_now
 
 
 QueueMutationState = Literal["queued", "paused"]
+_QUEUE_IMMEDIATE_TRANSACTION_KEY: Final = "workstation_queue_immediate_transaction"
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +105,7 @@ def set_queue_state(session: Session, task_id: str, state: QueueMutationState) -
 
 def enqueue_task(session: Session, task_id: str) -> QueueEntry:
     """Ensure a task has a queued projection entry before the worker can see it."""
+    _begin_immediate(session)
     entry = session.get(QueueEntry, task_id)
     if entry is not None:
         return entry
@@ -121,6 +123,7 @@ def enqueue_task(session: Session, task_id: str) -> QueueEntry:
 
 def requeue_task(session: Session, task_id: str) -> QueueEntry:
     """Put a retried task at the back of the waiting queue as one new revision."""
+    _begin_immediate(session)
     entry = session.get(QueueEntry, task_id)
     if entry is None:
         return enqueue_task(session, task_id)
@@ -160,6 +163,7 @@ def claim_next_queue_entry(session: Session) -> QueueEntry | None:
 
 def finish_queue_entry(session: Session, task_id: str) -> None:
     """Retain a completed queue row as immutable history rather than deleting it."""
+    _begin_immediate(session)
     entry = session.get(QueueEntry, task_id)
     if entry is None:
         return
@@ -172,11 +176,38 @@ def finish_queue_entry(session: Session, task_id: str) -> None:
     _increment_and_snapshot(session, now=entry.updated_at)
 
 
+def delete_queue_entry(session: Session, task_id: str) -> None:
+    """Remove an inactive queue entry while publishing normalized queue state."""
+    _begin_immediate(session)
+    entry = session.get(QueueEntry, task_id)
+    if entry is None:
+        return
+    now = utc_now()
+    session.delete(entry)
+    session.flush()
+    _normalize_positions(session, now=now)
+    _increment_and_snapshot(session, now=now)
+
+
+def begin_queue_mutation(session: Session) -> None:
+    """Acquire the queue's SQLite writer lock before non-queue state changes begin."""
+    _begin_immediate(session)
+
+
 def _begin_immediate(session: Session) -> None:
     """Acquire SQLite's writer lock before reading mutable queue state."""
-    if session.in_transaction():
+    transaction = session.get_transaction()
+    if transaction is None:
+        session.execute(text("BEGIN IMMEDIATE"))
+        session.info[_QUEUE_IMMEDIATE_TRANSACTION_KEY] = session.get_transaction()
         return
+    if session.info.get(_QUEUE_IMMEDIATE_TRANSACTION_KEY) is transaction:
+        return
+    if session.new or session.dirty or session.deleted:
+        raise RuntimeError("Queue mutation must acquire BEGIN IMMEDIATE before writing")
+    session.rollback()
     session.execute(text("BEGIN IMMEDIATE"))
+    session.info[_QUEUE_IMMEDIATE_TRANSACTION_KEY] = session.get_transaction()
 
 
 def _queue_state(session: Session) -> QueueState:

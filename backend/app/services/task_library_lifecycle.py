@@ -13,7 +13,6 @@ from app.models import (
     ClipCandidate,
     MediaSource,
     PipelineRun,
-    QueueEntry,
     StageRun,
     Task,
     TaskExecutionControl,
@@ -108,9 +107,11 @@ def apply_task_bulk_mutation(
 def _delete_task_owned_database_rows(session: Session, task: Task) -> None:
     """Delete all known database dependents; this bulk API intentionally does not delete managed files."""
     pipeline_run_ids = select(PipelineRun.id).where(PipelineRun.task_id == task.id)
+    from app.services.workstation_queue import delete_queue_entry
+
+    delete_queue_entry(session, task.id)
     session.exec(delete(StageRun).where(StageRun.run_id.in_(pipeline_run_ids)))
     session.exec(delete(PipelineRun).where(PipelineRun.task_id == task.id))
-    session.exec(delete(QueueEntry).where(QueueEntry.task_id == task.id))
     session.exec(delete(TaskTagLink).where(TaskTagLink.task_id == task.id))
     session.exec(delete(MediaSource).where(MediaSource.task_id == task.id))
     session.exec(delete(TaskExecutionControl).where(TaskExecutionControl.task_id == task.id))

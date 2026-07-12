@@ -24,6 +24,7 @@ from app.services.clip_export import ClipExportFailure, export_confirmed_clip
 from app.services.asr_whisperx import download_asr_missing_models
 from app.services.storage import build_artifact_content_path, resolve_task_artifact_path
 from app.services.task_control import can_force_kill, request_cancel, request_force_kill
+from app.services.workstation_queue import QueueConflict
 from app.settings import get_settings
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -160,6 +161,9 @@ def task_retry_endpoint(
 ) -> dict:
     try:
         retry_result = retry_task_from_stage(session, task_id, payload.stage_name)
+    except QueueConflict as exc:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if retry_result is None:

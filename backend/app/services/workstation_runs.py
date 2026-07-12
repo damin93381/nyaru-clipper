@@ -27,6 +27,16 @@ def get_pending_pipeline_run(session: Session, task_id: str) -> PipelineRun | No
     ).first()
 
 
+def get_active_pipeline_run(session: Session, task_id: str) -> PipelineRun | None:
+    """Return the latest pending or running pipeline execution for recovery paths."""
+    return session.exec(
+        select(PipelineRun)
+        .where(PipelineRun.task_id == task_id)
+        .where(PipelineRun.status.in_(["pending", "running"]))
+        .order_by(PipelineRun.created_at.desc(), PipelineRun.id.desc())
+    ).first()
+
+
 def start_pipeline_run(session: Session, run: PipelineRun) -> None:
     """Mark a pending run active when the worker begins its legacy pipeline."""
     if run.status != "pending":

@@ -225,3 +225,48 @@ def test_retry_endpoint_after_asr_preserves_asr_progress_and_successful_upstream
         assert stages["translation"] == "pending"
         assert progress_stage_name == "asr"
         assert progress_latest_message == "asr complete"
+
+
+def test_retry_endpoint_rejects_running_task_without_creating_another_run(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    db_path = tmp_path / "task-state.sqlite3"
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("APP_DATABASE_URL", f"sqlite:///{db_path}")
+    _reset_runtime_state()
+
+    from app.db import session_scope
+    from app.main import app
+    from app.models import PipelineRun, QueueState, Task, TaskJob, TaskStage
+
+    with TestClient(app) as client:
+        task_id = _create_task(client)
+        with session_scope() as session:
+            task = session.get(Task, task_id)
+            assert task is not None
+            task.status = "running"
+            session.add(task)
+            job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+            job.status = "running"
+            session.add(job)
+            stage = session.exec(
+                select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "ingest")
+            ).one()
+            stage.status = "running"
+            session.add(stage)
+            initial_run_count = len(session.exec(select(PipelineRun).where(PipelineRun.task_id == task_id)).all())
+            queue_state = session.get(QueueState, 1)
+            assert queue_state is not None
+            initial_revision = queue_state.revision
+
+        retry_response = client.post(f"/api/tasks/{task_id}/retry", json={"stage_name": "ingest"})
+
+        with session_scope() as session:
+            final_run_count = len(session.exec(select(PipelineRun).where(PipelineRun.task_id == task_id)).all())
+            queue_state = session.get(QueueState, 1)
+            assert queue_state is not None
+            final_revision = queue_state.revision
+
+    assert retry_response.status_code == 409
+    assert retry_response.json() == {"detail": "Task must be terminal before retry"}
+    assert final_run_count == initial_run_count
+    assert final_revision == initial_revision

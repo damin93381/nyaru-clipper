@@ -109,6 +109,9 @@ def test_failure_cancellation_and_retry_preserve_accurate_run_history(database, 
         translation = session.exec(
             select(TaskStage).where(TaskStage.task_id == "task-history").where(TaskStage.name == "translation")
         ).one()
+        from app.repositories.workstation import get_workstation_task_overview
+
+        overview = get_workstation_task_overview(session, "task-history")
 
     assert len(runs) == 2
     assert runs[0].id == failed_run_id
@@ -116,6 +119,20 @@ def test_failure_cancellation_and_retry_preserve_accurate_run_history(database, 
     assert runs[1].status == "pending"
     assert runs[1].trigger == "retry"
     assert translation.status == "pending"
+    assert overview is not None
+    assert overview.pipeline_run_id == runs[1].id
+    overview_statuses = {stage.name: stage.status for stage in overview.stages}
+    assert overview_statuses["translation"] == "pending"
+    assert "failed" not in overview_statuses.values()
+
+    from app.services.workstation_queue import QueueConflict
+
+    with Session(database) as session:
+        with pytest.raises(QueueConflict, match="terminal"):
+            retry_task_from_stage(session, "task-history", "translation")
+        run_count = len(session.exec(select(PipelineRun).where(PipelineRun.task_id == "task-history")).all())
+
+    assert run_count == 2
 
 
 def test_cancellation_finalizes_the_pending_run_without_erasing_stage_history(database, monkeypatch) -> None:

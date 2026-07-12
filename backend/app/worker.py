@@ -22,8 +22,8 @@ from app.services.task_control import (
     clear_execution_control,
 )
 from app.services.task_runner import run_task_pipeline
-from app.services.workstation_queue import claim_next_queue_entry, finish_queue_entry
-from app.services.workstation_runs import finish_pipeline_run, get_pending_pipeline_run, start_pipeline_run, sync_stage_run
+from app.services.workstation_queue import begin_queue_mutation, claim_next_queue_entry, finish_queue_entry
+from app.services.workstation_runs import finish_pipeline_run, get_active_pipeline_run, get_pending_pipeline_run, start_pipeline_run, sync_stage_run
 
 
 @dataclass(slots=True)
@@ -104,6 +104,7 @@ def _mark_job_stale_failed(session, job: TaskJob) -> None:
     job.finished_at = now
     job.updated_at = now
     session.add(job)
+    active_run = get_active_pipeline_run(session, job.task_id)
 
     if task is not None:
         task.status = "failed"
@@ -118,11 +119,11 @@ def _mark_job_stale_failed(session, job: TaskJob) -> None:
         stage.updated_at = now
         session.add(stage)
         append_stage_log(log_file_for_stage(job.task_id, job.stage_name), "worker:recovered stale running job")
-        pending_run = get_pending_pipeline_run(session, job.task_id)
-        if pending_run is not None:
-            start_pipeline_run(session, pending_run)
-            sync_stage_run(session, pending_run.id, stage)
-            finish_pipeline_run(session, pending_run, "failed")
+        if active_run is not None:
+            start_pipeline_run(session, active_run)
+            sync_stage_run(session, active_run.id, stage)
+    if active_run is not None:
+        finish_pipeline_run(session, active_run, "failed")
     finish_queue_entry(session, job.task_id)
 
 
@@ -149,6 +150,7 @@ def _recover_stale_running_jobs(session) -> None:
 
 def claim_next_job() -> ClaimedJob | None:
     with session_scope() as session:
+        begin_queue_mutation(session)
         _recover_stale_running_jobs(session)
         running_gpu_job = session.exec(
             select(TaskJob).where(TaskJob.gpu_bound.is_(True)).where(TaskJob.status == "running")
@@ -192,6 +194,7 @@ def claim_next_job() -> ClaimedJob | None:
 
 def complete_job(task_id: str, *, success: bool) -> None:
     with session_scope() as session:
+        begin_queue_mutation(session)
         job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).first()
         task = session.get(Task, task_id)
         if job is None or task is None:
@@ -244,10 +247,12 @@ def run_worker_iteration(processor: Callable[[ClaimedJob], bool] | None = None) 
                         execution_token=execution_token,
                     )
                 except Exception:
+                    begin_queue_mutation(session)
                     finish_queue_entry(session, claimed_job.task_id)
                     session.commit()
                     raise
                 if result.final_status in {"success", "failed", "cancelled"}:
+                    begin_queue_mutation(session)
                     finish_queue_entry(session, claimed_job.task_id)
                     session.commit()
             finally:

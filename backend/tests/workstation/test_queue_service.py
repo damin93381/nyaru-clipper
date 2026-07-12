@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from sqlalchemy import event
 from sqlmodel import Session, select
 
 
@@ -131,3 +132,28 @@ def test_concurrent_claims_leave_one_running_gpu_entry(database) -> None:
 
     assert [task_id for task_id in claimed_ids if task_id is not None] in (["task-a"], ["task-b"])
     assert len(running_entries) == 1
+
+
+def test_reorder_restarts_a_read_only_session_with_begin_immediate(database) -> None:
+    from app.services.workstation_queue import get_queue_snapshot, reorder_queue
+
+    statements: list[str] = []
+
+    def record_statement(connection, cursor, statement, parameters, context, executemany) -> None:
+        statements.append(statement)
+
+    event.listen(database, "before_cursor_execute", record_statement)
+    try:
+        with Session(database) as session:
+            _seed_queue(session, ("task-a", "task-b"))
+            snapshot = get_queue_snapshot(session)
+            reordered = reorder_queue(session, ["task-b", "task-a"], expected_revision=snapshot.revision)
+            session.commit()
+            after_commit = get_queue_snapshot(session)
+            reorder_queue(session, ["task-a", "task-b"], expected_revision=after_commit.revision)
+            session.commit()
+    finally:
+        event.remove(database, "before_cursor_execute", record_statement)
+
+    assert reordered.revision == snapshot.revision + 1
+    assert sum(statement.strip().upper() == "BEGIN IMMEDIATE" for statement in statements) == 2

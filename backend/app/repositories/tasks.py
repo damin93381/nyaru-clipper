@@ -300,6 +300,10 @@ def create_task(session: Session, source_url: str) -> tuple[dict[str, Any], bool
         assert record is not None
         return _task_to_response(record.task, record.stages, artifacts=record.artifacts, created=False), False
 
+    from app.services.workstation_queue import begin_queue_mutation
+
+    begin_queue_mutation(session)
+
     task_id = f"task-{uuid4().hex[:12]}"
     ensure_task_dirs(task_id)
     task = Task(
@@ -395,6 +399,17 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
         return None
     if stage_name not in CANONICAL_STAGES:
         raise ValueError(f"Unknown stage: {stage_name}")
+    if record.task.status not in TERMINAL_STATUSES:
+        from app.services.workstation_queue import QueueConflict, get_queue_snapshot
+
+        raise QueueConflict(get_queue_snapshot(session), "Task must be terminal before retry")
+
+    from app.services.workstation_queue import begin_queue_mutation
+
+    begin_queue_mutation(session)
+    record = get_task_record(session, task_id)
+    if record is None:
+        return None
 
     reset_index = CANONICAL_STAGES.index(stage_name)
     for stage in record.stages:
