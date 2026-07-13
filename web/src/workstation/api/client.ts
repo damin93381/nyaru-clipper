@@ -2,8 +2,12 @@ import createClient from "openapi-fetch";
 
 import type { paths } from "../../generated/api-schema";
 
-const defaultApiBaseUrl = "http://127.0.0.1:8000/api";
+const defaultApiOrigin = "http://127.0.0.1:8000";
+
+function normalizeApiOrigin(configuredBaseUrl: string): string {
+  return configuredBaseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
+}
 
 export const workstationClient = createClient<paths>({
-  baseUrl: (import.meta.env.VITE_API_BASE_URL ?? defaultApiBaseUrl).replace(/\/$/, ""),
+  baseUrl: normalizeApiOrigin(import.meta.env.VITE_API_BASE_URL ?? defaultApiOrigin),
 });

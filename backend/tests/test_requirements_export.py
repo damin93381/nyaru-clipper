@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPORT_SCRIPT = REPO_ROOT / "scripts" / "export_backend_requirements.sh"
 OPENAPI_EXPORT_SCRIPT = REPO_ROOT / "scripts" / "export_openapi_schema.py"
+WEB_DIR = REPO_ROOT / "web"
 CUDA_PROFILE_PATH = REPO_ROOT / "backend" / "requirements-linux-cuda.txt"
 WSL_ROCM_PROFILE_PATH = REPO_ROOT / "backend" / "requirements-wsl-rocm.txt"
 
@@ -39,6 +41,19 @@ def _run_openapi_export(output_path: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(OPENAPI_EXPORT_SCRIPT), "--output", str(output_path)],
         cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_workstation_contract_check() -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment["BACKEND_PYTHON"] = sys.executable
+    return subprocess.run(
+        ["pnpm", "api:check"],
+        cwd=WEB_DIR,
+        env=environment,
         capture_output=True,
         text=True,
         check=False,
@@ -127,6 +142,12 @@ def test_openapi_export_is_deterministic_and_contains_workstation_task_contract(
 
     schema = json.loads(first_output_path.read_text(encoding="utf-8"))
     assert "/api/v2/tasks" in schema["paths"]
+
+
+def test_checked_in_workstation_contract_has_no_generation_drift() -> None:
+    result = _run_workstation_contract_check()
+
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_checked_in_linux_cuda_profile_artifact_contains_cuda_runtime_requirements() -> None:

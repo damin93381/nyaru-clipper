@@ -12,8 +12,9 @@
     "build": "tsc -b && vite build",
     "test": "vitest",
     "test:e2e": "playwright test",
-    "api:export": "if [ -x ../backend/.venv/bin/python ]; then ../backend/.venv/bin/python ../scripts/export_openapi_schema.py --output openapi.json; else ../../../backend/.venv/bin/python ../scripts/export_openapi_schema.py --output openapi.json; fi",
-    "api:generate": "pnpm api:export && openapi-typescript openapi.json -o src/generated/api-schema.ts"
+    "api:export": "${BACKEND_PYTHON:-../backend/.venv/bin/python} ../scripts/export_openapi_schema.py --output openapi.json",
+    "api:generate": "pnpm api:export && openapi-typescript openapi.json -o src/generated/api-schema.ts",
+    "api:check": "pnpm api:generate && git diff --exit-code -- openapi.json src/generated/api-schema.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.1",

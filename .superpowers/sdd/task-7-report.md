@@ -24,5 +24,21 @@
 
 ## Concerns
 
-- The worktree does not contain `backend/.venv`; `api:export` uses that normal repository path first and falls back to the shared venv three levels above the worktree so `api:generate` is directly runnable in this environment. A normal checkout continues to use `../backend/.venv/bin/python`.
+- The worktree does not contain `backend/.venv`; `api:export` therefore requires an explicit `BACKEND_PYTHON` override when run from this isolated worktree. A normal checkout uses `../backend/.venv/bin/python`.
 - Corepack's default pnpm launcher attempted to download pnpm despite the cached `10.33.2` distribution and timed out. Verification used that cached pnpm executable with Node 22; package resolution and lockfile updates completed successfully.
+
+## Review fixes
+
+- Normalized the workstation OpenAPI client base URL to the API origin so both its default and the documented `VITE_API_BASE_URL=http://<host>:8000/api` send generated `/api/v2/...` paths exactly once.
+- Removed the worktree-depth fallback from `api:export`. It now defaults to the documented `../backend/.venv/bin/python` and supports an explicit `BACKEND_PYTHON` override for isolated worktrees.
+- Added `api:check`, which regenerates the checked-in OpenAPI JSON and TypeScript contract and fails if either artifact drifts. The backend export tests execute this repository-level check.
+
+## Review-fix verification
+
+- `pnpm --dir web api:generate` and `pnpm --dir web api:check` — passed with an explicit isolated-worktree `BACKEND_PYTHON`.
+- `./scripts/export_backend_requirements.sh --output <temporary path>` — passed.
+- `backend/tests/test_requirements_export.py` — `7 passed`.
+- `pnpm --dir web test --run src/workstation/api/__tests__/client.test.ts` — `3 passed`.
+- `pnpm --dir web build` — passed.
+- `git diff --check` and generated-contract diff check — passed.
+- `./scripts/export_backend_requirements.sh --check` remains blocked by a pre-existing stale `backend/requirements.txt`; that generated artifact is outside this review-fix scope and was not changed.
