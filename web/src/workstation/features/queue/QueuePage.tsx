@@ -24,15 +24,33 @@ export function QueuePage(): ReactNode {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const mutationLockRef = useRef(false);
   const queueQuery = useQuery({ queryKey: workstationKeys.queue, queryFn: getQueue });
+
+  async function cancelQueueQueries(): Promise<void> {
+    await queryClient.cancelQueries({ queryKey: workstationKeys.queue });
+  }
+
+  async function refetchQueueAfterMutation(): Promise<void> {
+    try {
+      await queryClient.invalidateQueries({ queryKey: workstationKeys.queue, refetchType: "active" });
+    } finally {
+      mutationLockRef.current = false;
+    }
+  }
+
   const reorderMutation = useMutation<QueueSnapshot, Error, ReorderVariables, ReorderContext>({
     mutationFn: ({ expectedRevision, orderedTaskIds }) => reorderQueue(orderedTaskIds, expectedRevision),
-    onMutate: ({ orderedTaskIds }) => {
+    onMutate: async ({ orderedTaskIds }) => {
+      await cancelQueueQueries();
       const previous = queryClient.getQueryData<QueueSnapshot>(workstationKeys.queue);
       if (previous !== undefined) queryClient.setQueryData(workstationKeys.queue, reorderSnapshot(previous, orderedTaskIds));
       return { previous };
     },
-    onSuccess: (snapshot) => queryClient.setQueryData(workstationKeys.queue, snapshot),
-    onError: (error, _variables, context) => {
+    onSuccess: async (snapshot) => {
+      await cancelQueueQueries();
+      queryClient.setQueryData(workstationKeys.queue, snapshot);
+    },
+    onError: async (error, _variables, context) => {
+      await cancelQueueQueries();
       if (error instanceof QueueConflictError) {
         queryClient.setQueryData(workstationKeys.queue, error.snapshot);
         setAnnouncement("队列已在其他操作中变化，已恢复最新顺序。");
@@ -41,13 +59,20 @@ export function QueuePage(): ReactNode {
       if (context?.previous !== undefined) queryClient.setQueryData(workstationKeys.queue, context.previous);
       setAnnouncement("队列排序没有保存，请重试。");
     },
-    onSettled: () => { mutationLockRef.current = false; },
+    onSettled: refetchQueueAfterMutation,
   });
   const stateMutation = useMutation({
     mutationFn: ({ state, taskId }: { readonly state: QueueState; readonly taskId: string }) => setQueueItemState(taskId, state),
-    onSuccess: (snapshot) => queryClient.setQueryData(workstationKeys.queue, snapshot),
-    onError: () => setAnnouncement("队列状态没有保存，请重试。"),
-    onSettled: () => { mutationLockRef.current = false; },
+    onMutate: cancelQueueQueries,
+    onSuccess: async (snapshot) => {
+      await cancelQueueQueries();
+      queryClient.setQueryData(workstationKeys.queue, snapshot);
+    },
+    onError: async () => {
+      await cancelQueueQueries();
+      setAnnouncement("队列状态没有保存，请重试。");
+    },
+    onSettled: refetchQueueAfterMutation,
   });
 
   function reorder(orderedTaskIds: readonly string[]): void {

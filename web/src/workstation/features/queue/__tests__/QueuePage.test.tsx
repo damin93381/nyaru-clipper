@@ -2,6 +2,15 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderWorkstation } from "../../../testing/renderWorkstation";
+import { workstationKeys } from "../../../api/queryKeys";
+import type { QueueSnapshot } from "../api";
+
+type QueueSnapshotFixture = {
+  readonly active: QueueSnapshot["active"];
+  readonly paused: readonly QueueSnapshot["paused"][number][];
+  readonly queued: readonly QueueSnapshot["queued"][number][];
+  readonly revision: number;
+};
 
 const queueSnapshot = {
   active: { position: 0, priority: 0, state: "running", task_id: "task-active" },
@@ -29,9 +38,9 @@ function deferredResponse(): { readonly promise: Promise<Response>; readonly res
   };
 }
 
-async function renderQueue(): Promise<void> {
+async function renderQueue() {
   const { QueuePage } = await import("../QueuePage");
-  renderWorkstation(<QueuePage />);
+  return renderWorkstation(<QueuePage />);
 }
 
 function openQueueMenu(taskId: string): void {
@@ -91,15 +100,22 @@ describe("QueuePage", () => {
 
   it("optimistically reorders queued work and sends the current revision", async () => {
     const response = deferredResponse();
+    const staleQueueResponse = deferredResponse();
     const requests: { body: unknown; method: string; url: URL }[] = [];
+    let latestSnapshot: QueueSnapshotFixture = queueSnapshot;
+    let queueGetCount = 0;
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = await queueRequest(input, init);
       requests.push(request);
       if (request.url.pathname.endsWith("/order")) return response.promise;
-      return jsonResponse(queueSnapshot);
+      if (request.url.pathname.endsWith("/queue")) {
+        queueGetCount += 1;
+        if (queueGetCount === 2) return staleQueueResponse.promise;
+      }
+      return jsonResponse(latestSnapshot);
     });
 
-    await renderQueue();
+    const queryClient = await renderQueue();
     await screen.findByRole("button", { name: "task-first 操作" });
     openQueueMenu("task-first");
     fireEvent.click(await screen.findByRole("menuitem", { name: "下移" }));
@@ -109,16 +125,22 @@ describe("QueuePage", () => {
     const reorderRequest = requests.find((request) => request.url.pathname.endsWith("/order"));
     expect(reorderRequest).toMatchObject({ body: { expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] }, method: "PUT" });
 
-    response.resolve(jsonResponse({ ...queueSnapshot, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]], revision: 8 }));
+    void queryClient.invalidateQueries({ queryKey: workstationKeys.queue });
+    await waitFor(() => expect(queueGetCount).toBe(2));
+    latestSnapshot = { ...queueSnapshot, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]], revision: 8 };
+    response.resolve(jsonResponse(latestSnapshot));
+    await waitFor(() => expect(queueGetCount).toBe(3));
+    staleQueueResponse.resolve(jsonResponse(queueSnapshot));
     await waitFor(() => expect(screen.getByText("队列版本 8")).toBeVisible());
   });
 
   it("disables every queue mutation control while a queue change is pending", async () => {
     const response = deferredResponse();
+    let latestSnapshot: QueueSnapshotFixture = queueSnapshot;
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = await queueRequest(input, init);
       if (request.url.pathname.endsWith("/order")) return response.promise;
-      return jsonResponse(queueSnapshot);
+      return jsonResponse(latestSnapshot);
     });
 
     await renderQueue();
@@ -130,17 +152,19 @@ describe("QueuePage", () => {
     expect(screen.getByRole("button", { name: "task-third 操作" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "拖动 task-active" })).toBeDisabled();
 
-    response.resolve(jsonResponse({ ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] }));
+    latestSnapshot = { ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] };
+    response.resolve(jsonResponse(latestSnapshot));
     await waitFor(() => expect(screen.getByRole("button", { name: "拖动 task-second" })).toBeEnabled());
   });
 
   it("reorders queued work through keyboard-only menu controls", async () => {
     const requests: { body: unknown; method: string; url: URL }[] = [];
+    let latestSnapshot: QueueSnapshotFixture = queueSnapshot;
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = await queueRequest(input, init);
       requests.push(request);
-      if (request.url.pathname.endsWith("/order")) return jsonResponse({ ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] });
-      return jsonResponse(queueSnapshot);
+      if (request.url.pathname.endsWith("/order")) latestSnapshot = { ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] };
+      return jsonResponse(latestSnapshot);
     });
 
     await renderQueue();
@@ -155,12 +179,13 @@ describe("QueuePage", () => {
 
   it("reorders queued work through the dnd-kit pointer sensor without moving the active entry", async () => {
     const requests: { body: unknown; method: string; url: URL }[] = [];
+    let latestSnapshot: QueueSnapshotFixture = queueSnapshot;
     installQueueRowLayout();
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = await queueRequest(input, init);
       requests.push(request);
-      if (request.url.pathname.endsWith("/order")) return jsonResponse({ ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] });
-      return jsonResponse(queueSnapshot);
+      if (request.url.pathname.endsWith("/order")) latestSnapshot = { ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] };
+      return jsonResponse(latestSnapshot);
     });
 
     await renderQueue();
@@ -178,12 +203,13 @@ describe("QueuePage", () => {
 
   it("reorders queued work through the dnd-kit keyboard sensor", async () => {
     const requests: { body: unknown; method: string; url: URL }[] = [];
+    let latestSnapshot: QueueSnapshotFixture = queueSnapshot;
     installQueueRowLayout();
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = await queueRequest(input, init);
       requests.push(request);
-      if (request.url.pathname.endsWith("/order")) return jsonResponse({ ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] });
-      return jsonResponse(queueSnapshot);
+      if (request.url.pathname.endsWith("/order")) latestSnapshot = { ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] };
+      return jsonResponse(latestSnapshot);
     });
 
     await renderQueue();
@@ -199,13 +225,14 @@ describe("QueuePage", () => {
 
   it("promotes, pauses, and resumes an entry through explicit menu actions", async () => {
     const requests: { body: unknown; method: string; url: URL }[] = [];
+    let latestSnapshot: QueueSnapshotFixture = queueSnapshot;
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = await queueRequest(input, init);
       requests.push(request);
-      if (request.url.pathname.endsWith("/order")) return jsonResponse({ ...queueSnapshot, queued: [queueSnapshot.queued[2], queueSnapshot.queued[0], queueSnapshot.queued[1]], revision: 8 });
-      if (request.url.pathname.endsWith("/task-third")) return jsonResponse({ ...queueSnapshot, paused: [queueSnapshot.queued[2], ...queueSnapshot.paused], queued: [queueSnapshot.queued[0], queueSnapshot.queued[1]], revision: 9 });
-      if (request.url.pathname.endsWith("/task-paused")) return jsonResponse({ ...queueSnapshot, paused: [], queued: [...queueSnapshot.queued, queueSnapshot.paused[0]], revision: 10 });
-      return jsonResponse(queueSnapshot);
+      if (request.url.pathname.endsWith("/order")) latestSnapshot = { ...queueSnapshot, queued: [queueSnapshot.queued[2], queueSnapshot.queued[0], queueSnapshot.queued[1]], revision: 8 };
+      if (request.url.pathname.endsWith("/task-third")) latestSnapshot = { ...queueSnapshot, paused: [queueSnapshot.queued[2], ...queueSnapshot.paused], queued: [queueSnapshot.queued[0], queueSnapshot.queued[1]], revision: 9 };
+      if (request.url.pathname.endsWith("/task-paused")) latestSnapshot = { ...queueSnapshot, paused: [], queued: [...queueSnapshot.queued, queueSnapshot.paused[0]], revision: 10 };
+      return jsonResponse(latestSnapshot);
     });
 
     await renderQueue();
@@ -228,7 +255,7 @@ describe("QueuePage", () => {
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       if (url.pathname.endsWith("/order")) return jsonResponse(conflict, 409);
-      return jsonResponse(queueSnapshot);
+      return jsonResponse(conflict);
     });
 
     await renderQueue();
@@ -243,5 +270,43 @@ describe("QueuePage", () => {
     expect(screen.getByRole("row", { name: /task-second/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getAllByRole("row").map((row) => row.textContent).join(" ")).toMatch(/task-third[\s\S]*task-first[\s\S]*task-second/);
     expect(screen.getByText("队列版本 8")).toBeVisible();
+  });
+
+  it("keeps an authoritative conflict snapshot when an older event refetch settles after the mutation", async () => {
+    const conflict = { ...queueSnapshot, queued: [queueSnapshot.queued[2], queueSnapshot.queued[0], queueSnapshot.queued[1]], revision: 8 };
+    const mutationResponse = deferredResponse();
+    const staleQueueResponse = deferredResponse();
+    let queueGetCount = 0;
+
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = await queueRequest(input, init);
+      if (request.url.pathname.endsWith("/order")) return mutationResponse.promise;
+      if (request.url.pathname.endsWith("/queue")) {
+        queueGetCount += 1;
+        if (queueGetCount === 2) return staleQueueResponse.promise;
+        return jsonResponse(conflict);
+      }
+      return jsonResponse(queueSnapshot);
+    });
+
+    const queryClient = await renderQueue();
+    await screen.findByRole("button", { name: "task-first 操作" });
+    fireEvent.click(screen.getByRole("row", { name: /task-second/ }));
+    openQueueMenu("task-first");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "下移" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "拖动 task-second" })).toBeDisabled());
+    void queryClient.invalidateQueries({ queryKey: workstationKeys.queue });
+    await waitFor(() => expect(queueGetCount).toBe(2));
+
+    mutationResponse.resolve(jsonResponse(conflict, 409));
+    await screen.findByText("队列已在其他操作中变化，已恢复最新顺序。");
+    await waitFor(() => expect(queueGetCount).toBe(3));
+
+    staleQueueResponse.resolve(jsonResponse(queueSnapshot));
+
+    await waitFor(() => expect(screen.getByText("队列版本 8")).toBeVisible());
+    expect(screen.getByRole("row", { name: /task-second/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getAllByRole("row").map((row) => row.textContent).join(" ")).toMatch(/task-third[\s\S]*task-first[\s\S]*task-second/);
   });
 });
