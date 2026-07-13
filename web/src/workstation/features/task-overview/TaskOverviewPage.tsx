@@ -23,13 +23,84 @@ interface TitleSegmenterConstructor {
 }
 
 const titleCjkCharacter = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const japaneseCharacter = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const titleContentToken = /[\p{L}\p{N}]/u;
 const titlePostposition = /^(?:的|地|得|中|中的|里|上|下|内|外|前|后|间|时|の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも|의|은|는|이|가|을|를|에|에서|로|으로|와|과|도|만|까지|부터)$/u;
-const japanesePhraseBridge = /(?:の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも)$/u;
+const japaneseParticle = /^(?:の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも)$/u;
 const japanesePredicateContinuation = /^(?:する|した|して|される|された|されて|ある|いる|なる|なった|できる|できた|ない|たい)$/u;
 const titlePhraseLengthLimit = 12;
 
 function isTitleSegmenterConstructor(value: unknown): value is TitleSegmenterConstructor {
   return typeof value === "function";
+}
+
+function groupedJapaneseTitlePhrases(segments: readonly string[]): string[] {
+  const phrases: string[] = [];
+  let phrase = "";
+  let phraseEndsWithPredicate = false;
+  function flushPhrase(): void {
+    if (phrase === "") return;
+    phrases.push(phrase);
+    phrase = "";
+    phraseEndsWithPredicate = false;
+  }
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (!titleContentToken.test(segment)) {
+      flushPhrase();
+      phrases.push(segment);
+      continue;
+    }
+
+    const nextSegment = segments[index + 1];
+    let unit = segment;
+    let unitEndsWithPredicate = japanesePredicateContinuation.test(segment);
+    if (japaneseParticle.test(segment)) {
+      if (nextSegment === undefined || !titleContentToken.test(nextSegment)) {
+        flushPhrase();
+        phrases.push(segment);
+        continue;
+      }
+      unit = `${segment}${nextSegment}`;
+      unitEndsWithPredicate = japanesePredicateContinuation.test(nextSegment);
+      index += 1;
+      const predicateSegment = segments[index + 1];
+      if (predicateSegment !== undefined && japanesePredicateContinuation.test(predicateSegment)) {
+        unit = `${unit}${predicateSegment}`;
+        unitEndsWithPredicate = true;
+        index += 1;
+      }
+    } else if (nextSegment !== undefined && japanesePredicateContinuation.test(nextSegment)) {
+      unit = `${segment}${nextSegment}`;
+      unitEndsWithPredicate = true;
+      index += 1;
+    }
+
+    if (phrase === "" || (!phraseEndsWithPredicate && phrase.length + unit.length <= titlePhraseLengthLimit)) {
+      phrase = `${phrase}${unit}`;
+      phraseEndsWithPredicate = unitEndsWithPredicate;
+      continue;
+    }
+    flushPhrase();
+    phrase = unit;
+    phraseEndsWithPredicate = unitEndsWithPredicate;
+  }
+  flushPhrase();
+  return phrases;
+}
+
+function groupedTitlePhrases(segments: readonly string[]): string[] {
+  return segments.reduce<string[]>((currentPhrases, segment) => {
+    const previousPhrase = currentPhrases[currentPhrases.length - 1];
+    const combinedLength = previousPhrase === undefined ? 0 : previousPhrase.length + segment.length;
+    if (previousPhrase !== undefined && combinedLength <= titlePhraseLengthLimit && titleCjkCharacter.test(previousPhrase) && titlePostposition.test(segment)) {
+      currentPhrases[currentPhrases.length - 1] = `${previousPhrase}${segment}`;
+      return currentPhrases;
+    }
+    currentPhrases.push(segment);
+    return currentPhrases;
+  }, []);
 }
 
 function segmentedTaskTitle(title: string): ReactNode {
@@ -38,20 +109,9 @@ function segmentedTaskTitle(title: string): ReactNode {
   if (!isTitleSegmenterConstructor(segmenterConstructor)) return title;
 
   const segments = Array.from(new segmenterConstructor("zh-CN", { granularity: "word" }).segment(title), ({ segment }) => segment);
-  const phrases = segments.reduce<string[]>((currentPhrases, segment) => {
-    const previousPhrase = currentPhrases[currentPhrases.length - 1];
-    const combinedLength = previousPhrase === undefined ? 0 : previousPhrase.length + segment.length;
-    const extendsJapanesePhrase = previousPhrase !== undefined && japanesePhraseBridge.test(previousPhrase) && titleCjkCharacter.test(segment);
-    const extendsJapanesePredicate = previousPhrase !== undefined && japanesePredicateContinuation.test(segment);
-    if (previousPhrase !== undefined && combinedLength <= titlePhraseLengthLimit && titleCjkCharacter.test(previousPhrase) && (titlePostposition.test(segment) || extendsJapanesePhrase || extendsJapanesePredicate)) {
-      currentPhrases[currentPhrases.length - 1] = `${previousPhrase}${segment}`;
-      return currentPhrases;
-    }
-    currentPhrases.push(segment);
-    return currentPhrases;
-  }, []);
+  const phrases = japaneseCharacter.test(title) ? groupedJapaneseTitlePhrases(segments) : groupedTitlePhrases(segments);
 
-  return phrases.map((phrase, index) => titleCjkCharacter.test(phrase) && phrase.length <= titlePhraseLengthLimit
+  return phrases.map((phrase, index) => titleCjkCharacter.test(phrase) && phrase.length <= titlePhraseLengthLimit && !japaneseParticle.test(phrase)
     ? <span className="ny-task-overview__title-phrase" key={`${index}-${phrase}`}>{phrase}</span>
     : phrase);
 }

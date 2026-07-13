@@ -107,7 +107,7 @@ describe("TaskOverviewPage", () => {
   });
 
   it("keeps Japanese connective title clauses together without changing the accessible title", async () => {
-    const title = "映像の中にある字幕レビューを確認する場面が残る記録は続く音声も確認する";
+    const title = "映像の中にある字幕レビューを確認する。場面が残る。記録は続く。音声も確認する。";
     vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
 
     renderOverview();
@@ -116,7 +116,7 @@ describe("TaskOverviewPage", () => {
     const phrases = Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent);
     expect(heading).toHaveTextContent(title);
     expect(phrases).toContain("映像の中にある");
-    expect(phrases).toContain("レビューを確認する");
+    expect(phrases).toContain("字幕レビューを確認する");
     expect(phrases).toContain("場面が残る");
     expect(phrases).toContain("記録は続く");
     expect(phrases).toContain("音声も確認する");
@@ -136,6 +136,35 @@ describe("TaskOverviewPage", () => {
     expect(phrases).toContain("검토와");
     expect(phrases.every((phrase) => phrase.length <= 12)).toBe(true);
     expect(phrases).not.toContain("초장문운영작업공간제목토큰검증");
+  });
+
+  it.each(["の", "に", "が", "は", "も", "を"])("moves a %s particle and its content to the next phrase at the twelve-character boundary", async (particle) => {
+    const prefix = "映像の字幕の確認の場面";
+    const title = `${prefix}${particle}表示を確認する`;
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
+
+    renderOverview();
+
+    const heading = await screen.findByRole("heading", { name: title });
+    const phrases = Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent ?? "");
+    expect(phrases).toContain(`${particle}表示を確認する`);
+    expect(phrases).not.toContain(`${prefix}${particle}`);
+    expect(phrases.every((phrase) => phrase.length <= 12)).toBe(true);
+  });
+
+  it("keeps Japanese particles with adjacent Latin content", async () => {
+    const title = "字幕のAPIを確認する映像のChromeで確認する";
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
+
+    renderOverview();
+
+    const heading = await screen.findByRole("heading", { name: title });
+    const phrases = Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent);
+    expect(phrases).toContain("字幕のAPIを確認する");
+    expect(phrases).toContain("映像のChrome");
+    expect(phrases).toContain("で確認する");
+    expect(phrases).not.toContain("字幕の");
+    expect(phrases).not.toContain("映像の");
   });
 
   it("keeps non-CJK titles readable when the server runtime lacks Intl.Segmenter", async () => {
