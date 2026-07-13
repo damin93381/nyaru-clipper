@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { WorkstationConnectionState } from "../api/useWorkstationEvents";
 import { AppShell } from "../components/AppShell";
 import { PrimitiveShowcasePage } from "./PrimitiveShowcasePage";
+import { TaskLibraryPage } from "../features/task-library/TaskLibraryPage";
 
 interface WorkstationRouterProps {
   readonly connectionState: WorkstationConnectionState;
@@ -29,7 +30,7 @@ export function WorkstationRouter({ connectionState }: WorkstationRouterProps): 
   return (
     <Routes>
       <Route path="*" element={<AppShell connectionState={connectionState} />}>
-        <Route index element={<WorkspacePage description="任务库会在下一步提供筛选、批量操作与任务选择。" title="任务库" />} />
+        <Route index element={<TaskLibraryPage />} />
         <Route path="queue" element={<WorkspacePage description="处理队列会在下一步提供排序、暂停与恢复控制。" title="处理队列" />} />
         <Route path="tasks/:taskId" element={<TaskWorkspacePage />} />
         {import.meta.env.DEV ? <Route path="design-system" element={<PrimitiveShowcasePage />} /> : null}
