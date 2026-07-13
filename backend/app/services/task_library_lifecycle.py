@@ -23,6 +23,7 @@ from app.models import (
     TaskTagLink,
     utc_now,
 )
+from app.services.workstation_events import publish_event, publish_task_updated
 
 
 TaskBulkOperation: TypeAlias = Literal["archive", "unarchive", "delete"]
@@ -68,6 +69,7 @@ def patch_task_metadata(session: Session, task_id: str, patch: TaskMetadataPatch
             session.add(TaskTagLink(task_id=task.id, tag_name=tag_name))
     task.updated_at = utc_now()
     session.add(task)
+    publish_task_updated(session, task)
     return task
 
 
@@ -86,10 +88,12 @@ def apply_task_bulk_mutation(
             task.archived_at = utc_now()
             task.updated_at = utc_now()
             session.add(task)
+            publish_task_updated(session, task)
         case "unarchive":
             task.archived_at = None
             task.updated_at = utc_now()
             session.add(task)
+            publish_task_updated(session, task)
         case "delete":
             task_is_active = task.status == "running"
             if task_is_active:
@@ -120,4 +124,5 @@ def _delete_task_owned_database_rows(session: Session, task: Task) -> None:
     session.exec(delete(Artifact).where(Artifact.task_id == task.id))
     session.exec(delete(TaskStage).where(TaskStage.task_id == task.id))
     session.exec(delete(TaskJob).where(TaskJob.task_id == task.id))
+    publish_event(session, "task.deleted", task.id, {"task_id": task.id})
     session.delete(task)

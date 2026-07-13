@@ -101,6 +101,44 @@ def test_task_library_patch_replaces_tags(client: TestClient) -> None:
     assert response.json()["tags"] == ["featured", "new"]
 
 
+def test_task_library_lifecycle_mutations_publish_public_events(client: TestClient) -> None:
+    """Every successful v2 library lifecycle mutation has a safe SSE projection."""
+    from app.db import session_scope
+    from app.models import WorkstationEvent
+
+    # Given: one task whose host-private source must never enter an event payload.
+    task_id = "task-lifecycle-events"
+    with session_scope() as session:
+        _seed_task(session, task_id=task_id)
+
+    # When: v2 metadata, archive lifecycle, and deletion endpoints commit their mutations.
+    patch_response = client.patch(f"/api/v2/tasks/{task_id}", json={"title": "Renamed", "tags": ["safe"]})
+    archive_response = client.post("/api/v2/tasks/bulk", json={"operation": "archive", "task_ids": [task_id]})
+    unarchive_response = client.post("/api/v2/tasks/bulk", json={"operation": "unarchive", "task_ids": [task_id]})
+    delete_response = client.post("/api/v2/tasks/bulk", json={"operation": "delete", "task_ids": [task_id]})
+
+    # Then: each successful mutation is replayable, and the tombstone lets clients remove the row safely.
+    assert patch_response.status_code == 200
+    assert archive_response.status_code == 200
+    assert unarchive_response.status_code == 200
+    assert delete_response.status_code == 200
+    with session_scope() as session:
+        task_events = session.exec(
+            select(WorkstationEvent)
+            .where(WorkstationEvent.entity_id == task_id)
+            .order_by(WorkstationEvent.id)
+        ).all()
+        event_projections = [(event.event_type, event.payload_json) for event in task_events]
+
+    assert event_projections == [
+        ("task.updated", f'{{"task_id":"{task_id}","status":"pending"}}'),
+        ("task.updated", f'{{"task_id":"{task_id}","status":"pending"}}'),
+        ("task.updated", f'{{"task_id":"{task_id}","status":"pending"}}'),
+        ("task.deleted", f'{{"task_id":"{task_id}"}}'),
+    ]
+    assert all("file:///fixtures" not in payload_json for _, payload_json in event_projections)
+
+
 def test_task_library_bulk_reports_per_task_archive_and_missing_results(client: TestClient) -> None:
     # Given: one existing task and one absent task identifier.
     from app.db import session_scope
