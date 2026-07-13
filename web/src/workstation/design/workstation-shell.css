@@ -308,7 +308,8 @@
 .ny-task-overview { display: grid; gap: var(--ny-space-6); min-height: 100%; padding: var(--ny-space-10); }
 .ny-task-overview__header, .ny-overview__section-heading { display: flex; gap: var(--ny-space-4); align-items: start; justify-content: space-between; }
 .ny-task-overview__header > div, .ny-overview__section-heading > div { display: grid; gap: var(--ny-space-2); min-width: 0; }
-.ny-task-overview__title { line-break: strict; text-wrap: balance; word-break: auto-phrase; }
+.ny-task-overview__title { line-break: strict; overflow-wrap: anywhere; text-wrap: balance; word-break: auto-phrase; }
+.ny-task-overview__title-phrase { white-space: nowrap; }
 .ny-overview__stage-panel { display: grid; gap: var(--ny-space-4); padding: var(--ny-space-5); border: 1px solid var(--ny-border); background: var(--ny-surface); }
 .ny-overview__progress-label, .ny-overview__stage-message { margin: 0; color: var(--ny-ink-muted); font-family: var(--ny-font-mono); font-size: var(--ny-font-caption); line-height: var(--ny-line-body); }
 .ny-overview__stage-message { padding: var(--ny-space-3); border-left: 3px solid var(--ny-accent); color: var(--ny-ink); background: var(--ny-surface-muted); font-family: var(--ny-font-sans); font-size: var(--ny-font-body); }

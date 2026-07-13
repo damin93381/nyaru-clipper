@@ -95,6 +95,31 @@ describe("TaskOverviewPage", () => {
     expect(screen.getByText("暂无可用高光候选")).toBeVisible();
   });
 
+  it("keeps Chinese postpositional title phrases together without changing the accessible title", async () => {
+    const title = "单用户工作站在大型桌面屏幕中的任务概览的语义换行验证";
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
+
+    renderOverview();
+
+    const heading = await screen.findByRole("heading", { name: title });
+    expect(heading).toHaveTextContent(title);
+    expect(Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent)).toContain("屏幕中的");
+  });
+
+  it("keeps non-CJK titles readable when the server runtime lacks Intl.Segmenter", async () => {
+    const title = "very-long-operator-supplied-title-without-a-segmenter";
+    const segmenter = Reflect.get(Intl, "Segmenter");
+    Reflect.set(Intl, "Segmenter", undefined);
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
+
+    try {
+      renderOverview();
+      expect(await screen.findByRole("heading", { name: title })).toHaveTextContent(title);
+    } finally {
+      Reflect.set(Intl, "Segmenter", segmenter);
+    }
+  });
+
   it.each<["pending" | "success" | "cancelled", string, WorkstationTaskOverview["recovery_actions"]]>([
     ["pending", "等待开始", []],
     ["success", "任务已完成", []],

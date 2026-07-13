@@ -36,8 +36,31 @@
 @media (prefers-reduced-motion: reduce) {
   .ny-workstation *,
   .ny-workstation *::before,
-  .ny-workstation *::after {
+  .ny-workstation *::after,
+  .ny-overlay,
+  .ny-overlay *,
+  .ny-overlay *::before,
+  .ny-overlay *::after,
+  .ny-dialog-overlay,
+  .ny-dialog-overlay::before,
+  .ny-dialog-overlay::after,
+  .ny-menu,
+  .ny-menu *,
+  .ny-menu *::before,
+  .ny-menu *::after,
+  .ny-toast,
+  .ny-toast *,
+  .ny-toast *::before,
+  .ny-toast *::after,
+  .ny-toast-viewport,
+  [data-radix-popper-content-wrapper],
+  [data-radix-popper-content-wrapper] *,
+  [data-radix-popper-content-wrapper] *::before,
+  [data-radix-popper-content-wrapper] *::after {
     scroll-behavior: auto !important;
+    animation-delay: 0ms !important;
+    animation-duration: 0ms !important;
+    transition-delay: 0ms !important;
     transition-duration: 0ms !important;
   }
 }

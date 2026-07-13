@@ -14,6 +14,43 @@ interface TaskOverviewPageProps {
   readonly taskId: string;
 }
 
+interface TitleSegmenter {
+  segment(input: string): Iterable<{ readonly segment: string }>;
+}
+
+interface TitleSegmenterConstructor {
+  new (locales: string, options: { readonly granularity: "word" }): TitleSegmenter;
+}
+
+const cjkCharacter = /\p{Script=Han}/u;
+const cjkPostposition = /^(?:的|地|得|中|中的|里|上|下|内|外|前|后|间|时)$/u;
+const titlePhraseLengthLimit = 12;
+
+function isTitleSegmenterConstructor(value: unknown): value is TitleSegmenterConstructor {
+  return typeof value === "function";
+}
+
+function segmentedTaskTitle(title: string): ReactNode {
+  if (typeof Intl === "undefined") return title;
+  const segmenterConstructor: unknown = Reflect.get(Intl, "Segmenter");
+  if (!isTitleSegmenterConstructor(segmenterConstructor)) return title;
+
+  const segments = Array.from(new segmenterConstructor("zh-CN", { granularity: "word" }).segment(title), ({ segment }) => segment);
+  const phrases = segments.reduce<string[]>((currentPhrases, segment) => {
+    const previousPhrase = currentPhrases[currentPhrases.length - 1];
+    if (previousPhrase !== undefined && cjkPostposition.test(segment) && cjkCharacter.test(previousPhrase)) {
+      currentPhrases[currentPhrases.length - 1] = `${previousPhrase}${segment}`;
+      return currentPhrases;
+    }
+    currentPhrases.push(segment);
+    return currentPhrases;
+  }, []);
+
+  return phrases.map((phrase, index) => cjkCharacter.test(phrase) && phrase.length <= titlePhraseLengthLimit
+    ? <span className="ny-task-overview__title-phrase" key={`${index}-${phrase}`}>{phrase}</span>
+    : phrase);
+}
+
 function overviewArtifacts(task: Awaited<ReturnType<typeof getWorkstationTaskOverview>>): ArtifactRecord[] {
   return task.artifacts.map((artifact) => ({
     id: artifact.artifact_id,
@@ -79,7 +116,7 @@ export function TaskOverviewPage({ taskId }: TaskOverviewPageProps): ReactNode {
       <header className="ny-task-overview__header">
         <div>
           <p className="ny-workstation__eyebrow">任务概览</p>
-          <h1 className="ny-task-overview__title ny-workstation-page__title" id="task-overview-title">{task.title}</h1>
+          <h1 aria-label={task.title} className="ny-task-overview__title ny-workstation-page__title" id="task-overview-title">{segmentedTaskTitle(task.title)}</h1>
           <p className="ny-workstation-page__copy">{task.source_label}</p>
         </div>
         <p className={`ny-stamp ny-stamp--${status.tone}`}><StatusIcon tone={status.tone} />{status.label}</p>
