@@ -313,6 +313,8 @@
 .ny-overview__stage-message { padding: var(--ny-space-3); border-left: 3px solid var(--ny-accent); color: var(--ny-ink); background: var(--ny-surface-muted); font-family: var(--ny-font-sans); font-size: var(--ny-font-body); }
 .ny-progress__stage { padding: 0; }
 .ny-progress__stage-button { display: flex; gap: var(--ny-space-2); align-items: center; width: 100%; min-height: var(--ny-target-min); padding: var(--ny-space-2); border: 0; color: inherit; cursor: pointer; background: transparent; font: inherit; font-size: inherit; font-weight: inherit; text-align: left; }
+.ny-progress__stage-button svg { flex: 0 0 auto; }
+.ny-progress__stage-label { min-width: 0; white-space: nowrap; }
 .ny-progress__stage-button[aria-pressed="true"] { background: color-mix(in srgb, var(--ny-accent) 12%, var(--ny-surface)); }
 .ny-progress__stage-button:focus-visible { outline: 3px solid var(--ny-focus); outline-offset: -3px; }
 .ny-overview__recovery { min-height: auto; }
@@ -335,15 +337,19 @@
 .ny-task-overview .eyebrow { margin: 0; color: var(--ny-accent); font-size: var(--ny-font-caption); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
 .ny-task-overview .panel__header h3, .ny-task-overview .workspace-section h4 { margin: 0; color: var(--ny-ink); font-family: var(--ny-font-serif); font-size: var(--ny-font-section); line-height: var(--ny-line-tight); }
 .ny-task-overview .pill { min-height: var(--ny-target-min); padding: var(--ny-space-2) var(--ny-space-3); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink-muted); background: var(--ny-surface-muted); font-family: var(--ny-font-mono); font-size: var(--ny-font-caption); }
-.ny-task-overview .workspace-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ny-space-4); }
-.ny-task-overview .workspace-section { display: grid; gap: var(--ny-space-4); padding: var(--ny-space-4); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink); background: var(--ny-surface-muted); }
+.ny-task-overview .workspace-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ny-space-4); min-width: 0; }
+.ny-task-overview .workspace-section { display: grid; gap: var(--ny-space-4); min-width: 0; padding: var(--ny-space-4); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink); background: var(--ny-surface-muted); }
 .ny-task-overview .workspace-section__header, .ny-task-overview .candidate-card__header { display: flex; gap: var(--ny-space-3); align-items: start; justify-content: space-between; }
 .ny-task-overview .subtitle-table, .ny-task-overview .candidate-list, .ny-task-overview .candidate-card, .ny-task-overview .candidate-card__body, .ny-task-overview .candidate-card__controls, .ny-task-overview .workspace-downloads, .ny-task-overview .workspace-empty-state { display: grid; gap: var(--ny-space-3); }
-.ny-task-overview .subtitle-table__header, .ny-task-overview .subtitle-row { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--ny-space-3); align-items: start; }
+.ny-task-overview .subtitle-table__scroll { max-inline-size: 100%; overflow-x: auto; border: 1px solid var(--ny-border); background: var(--ny-surface); }
+.ny-task-overview .subtitle-table__scroll:focus-visible { outline: 3px solid var(--ny-focus); outline-offset: var(--ny-space-1); }
+.ny-task-overview .subtitle-table { min-inline-size: 45rem; padding: var(--ny-space-4); }
+.ny-task-overview .subtitle-table__header, .ny-task-overview .subtitle-row { display: grid; grid-template-columns: 10rem minmax(13rem, 1fr) minmax(21rem, 1.5fr); gap: var(--ny-space-3); align-items: start; }
 .ny-task-overview .subtitle-table__header { padding-bottom: var(--ny-space-3); border-bottom: 1px solid var(--ny-border); color: var(--ny-ink-muted); font-size: var(--ny-font-caption); font-weight: 700; }
 .ny-task-overview .subtitle-row { padding: var(--ny-space-3) 0; border-bottom: 1px solid var(--ny-border); }
 .ny-task-overview .subtitle-row:last-child { border-bottom: 0; }
 .ny-task-overview .subtitle-row p, .ny-task-overview .subtitle-row__meta, .ny-task-overview .candidate-card__body p, .ny-task-overview .workspace-empty-state p { margin: 0; color: var(--ny-ink); font-size: var(--ny-font-body); line-height: var(--ny-line-body); }
+.ny-task-overview .subtitle-row__source, .ny-task-overview .subtitle-row__translation { line-break: strict; text-wrap: pretty; word-break: auto-phrase; }
 .ny-task-overview .subtitle-row__meta { display: grid; gap: var(--ny-space-1); color: var(--ny-ink-muted); font-family: var(--ny-font-mono); font-size: var(--ny-font-caption); }
 .ny-task-overview .candidate-list { margin: 0; padding: 0; list-style: none; }
 .ny-task-overview .candidate-card, .ny-task-overview .workspace-empty-state { padding: var(--ny-space-4); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink); background: var(--ny-surface); }
@@ -415,4 +421,8 @@
   .ny-workstation__grid {
     grid-template-columns: 240px minmax(800px, 1fr) 360px;
   }
+}
+
+@media (max-width: 1439px) {
+  .ny-progress { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }

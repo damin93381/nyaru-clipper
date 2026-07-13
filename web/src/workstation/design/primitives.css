@@ -95,7 +95,7 @@
 }
 
 .ny-button:disabled {
-  color: var(--ny-ink-muted);
+  color: var(--ny-ink-disabled);
   cursor: not-allowed;
   background: var(--ny-surface-muted);
 }

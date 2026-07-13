@@ -82,12 +82,15 @@ describe("TaskOverviewPage", () => {
     expect(await screen.findByRole("heading", { name: "夏日回放字幕审阅" })).toBeVisible();
     expect(screen.getByText("夏日直播回放")).toBeVisible();
     expect(screen.getByRole("list", { name: "任务阶段" })).toHaveTextContent(/采集.*媒体准备.*语音转写.*翻译.*高光.*导出.*报告/);
+    expect(screen.getByRole("button", { name: /媒体准备/ }).querySelector(".ny-progress__stage-label")).toHaveTextContent("媒体准备");
+    expect(screen.getByRole("button", { name: /语音转写/ }).querySelector(".ny-progress__stage-label")).toHaveTextContent("语音转写");
     expect(screen.getByText("校准字幕时间轴 · 4 / 5")).toBeVisible();
     expect(screen.getByText("正在校准字幕时间轴")).toBeVisible();
     expect(screen.queryByText(/\/data\//)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /语音转写/ })).toBeVisible();
     expect(await screen.findByText("你好")).toBeVisible();
     expect(screen.getByText("こんにちは")).toBeVisible();
+    expect(screen.getByRole("region", { name: "字幕表格，可横向滚动" })).toHaveAttribute("tabindex", "0");
     expect(screen.getByText("暂无可用高光候选")).toBeVisible();
   });
 

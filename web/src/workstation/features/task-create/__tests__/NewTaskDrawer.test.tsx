@@ -252,4 +252,49 @@ describe("NewTaskDrawer", () => {
     expect(await screen.findByText("移动端录播")).toBeVisible();
     expect(inspectUrls).toEqual(["https://m.bilibili.com/video/BV1mobile"]);
   });
+
+  it.each([
+    "https://bilibili.com/video/BV1root",
+    "https://www.bilibili.com/video/BV1www",
+    "https://m.bilibili.com/video/BV1mobile",
+    "https://b23.tv/BV1short",
+  ])("accepts the supported Bilibili host %s", async (sourceUrl) => {
+    const inspectUrls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const next = await request(input, init);
+      if (next.url.pathname === "/api/v2/sources/bilibili/inspect") {
+        if (typeof next.body !== "object" || next.body === null || !("url" in next.body) || typeof next.body.url !== "string") {
+          throw new TypeError("Inspect request must contain a URL.");
+        }
+        inspectUrls.push(next.body.url);
+        return response({ normalized_url: sourceUrl, source_video_id: "BV1host", title: "受支持的来源", uploader: null, duration_seconds: null });
+      }
+      return response({ roots: [], root_id: null, relative_path: "", entries: [] });
+    });
+    renderDrawer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Bilibili 录播" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Bilibili 链接" }), { target: { value: sourceUrl } });
+    fireEvent.click(screen.getByRole("button", { name: "检查来源" }));
+
+    expect(await screen.findByText("受支持的来源")).toBeVisible();
+    expect(inspectUrls).toEqual([sourceUrl]);
+  });
+
+  it("rejects an unrelated HTTPS source before calling the Bilibili inspect endpoint", async () => {
+    const inspect = vi.fn();
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const next = await request(input, init);
+      if (next.url.pathname === "/api/v2/sources/bilibili/inspect") inspect();
+      return response({ roots: [], root_id: null, relative_path: "", entries: [] });
+    });
+    renderDrawer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Bilibili 录播" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Bilibili 链接" }), { target: { value: "https://example.com/video/BV1unrelated" } });
+    fireEvent.click(screen.getByRole("button", { name: "检查来源" }));
+
+    expect(await screen.findByText("请输入有效的 Bilibili 链接。")).toBeVisible();
+    expect(inspect).not.toHaveBeenCalled();
+  });
 });

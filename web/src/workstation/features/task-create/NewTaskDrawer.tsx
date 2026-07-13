@@ -108,7 +108,13 @@ function createTaskReducer(state: CreateTaskState, action: CreateTaskAction): Cr
 function isBilibiliUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "https:";
+    const hostname = parsed.hostname.toLowerCase();
+    return (
+      parsed.protocol === "https:" &&
+      (hostname === "bilibili.com" ||
+        hostname.endsWith(".bilibili.com") ||
+        hostname === "b23.tv")
+    );
   } catch {
     return false;
   }

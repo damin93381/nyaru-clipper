@@ -517,25 +517,32 @@ export function ExistingReviewWorkspace({
 							state={subtitleSectionState}
 						/>
 					) : subtitleRows.length > 0 ? (
-						<div className="subtitle-table">
-							<div className="subtitle-table__header">
-								<span>{subtitles.columns.segment}</span>
-								<span>{subtitles.columns.chinese}</span>
-								<span>{subtitles.columns.bilingual}</span>
-							</div>
-							{subtitleRows.map((row) => (
-								<div className="subtitle-row" key={row.id}>
-									<div className="subtitle-row__meta">
-										<strong>{row.id}</strong>
-										<span>
-											{formatTimestamp(row.startSeconds, row.endSeconds)}
-										</span>
+							<div
+								aria-label="字幕表格，可横向滚动"
+								className="subtitle-table__scroll"
+								role="region"
+								tabIndex={0}
+							>
+								<div className="subtitle-table">
+									<div className="subtitle-table__header">
+										<span>{subtitles.columns.segment}</span>
+										<span>{subtitles.columns.chinese}</span>
+										<span>{subtitles.columns.bilingual}</span>
 									</div>
-									<p>{row.chineseText}</p>
-									<p>{row.translatedText ?? subtitles.missingBilingual}</p>
+									{subtitleRows.map((row) => (
+										<div className="subtitle-row" key={row.id}>
+											<div className="subtitle-row__meta">
+												<strong>{row.id}</strong>
+												<span>
+													{formatTimestamp(row.startSeconds, row.endSeconds)}
+												</span>
+											</div>
+											<p className="subtitle-row__source" lang="zh-CN">{row.chineseText}</p>
+											<p className="subtitle-row__translation" lang="ja">{row.translatedText ?? subtitles.missingBilingual}</p>
+										</div>
+									))}
 								</div>
-							))}
-						</div>
+							</div>
 					) : null}
 				</section>
 

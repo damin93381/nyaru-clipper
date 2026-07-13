@@ -24,6 +24,7 @@ Nyaru-Clipper is a calm, precise desktop workstation for one operator managing m
 | Muted surface | `--ny-surface-muted` | `#f3eee4` | Table heads, disabled areas, secondary controls |
 | Primary ink | `--ny-ink` | `#211f1a` | Headings, body, icons, and strong rules |
 | Muted ink | `--ny-ink-muted` | `#756d60` | Supporting copy and technical metadata |
+| Disabled ink | `--ny-ink-disabled` | `#625a4f` | Disabled controls on muted ivory; preserves 4.5:1 text contrast |
 | Border | `--ny-border` | `#c9c0b0` | Fine dividers and component outlines |
 | Primary accent | `--ny-accent` | `#a43c2e` | Primary action, selection, active state, destructive emphasis when paired with a label |
 | Success | `--ny-success` | `#3e6755` | Successful stages and ready artifacts |
@@ -73,6 +74,7 @@ The first delivery supports desktop widths from 1280 px. Product screens are not
 - **States:** default, hover-capable, focus-visible, active, disabled, destructive.
 - **Spacing:** `--ny-space-2`/`--ny-space-3`; minimum target is 44 × 44 px.
 - **Accessibility:** accessible name required; disabled states use `disabled`; focus uses `--ny-focus` and does not rely on color alone.
+- **Disabled treatment:** disabled text uses `--ny-ink-disabled` on `--ny-surface-muted` (5.87:1), with a not-allowed cursor and no hover response.
 
 ### Input and field message
 
@@ -109,6 +111,11 @@ The first delivery supports desktop widths from 1280 px. Product screens are not
 - **Structure:** a focusable, labelled table region retains the dense 1200 px table; it places a visible scroll instruction before the row interaction hint and attaches the same instruction as the region description.
 - **States:** resting, keyboard focus-visible, horizontal overflow, selected, failed.
 - **Accessibility:** the region is reachable with Tab and uses Left/Right Arrow to move by the current viewport; selection and task-title columns remain sticky so horizontal scanning retains task context. Keep operational columns such as progress, updated time, and storage in the data table rather than hiding them.
+
+### Subtitle review table
+
+- **Structure:** the review workspace keeps subtitles and candidate controls in a single reading column; subtitle rows sit inside a labelled, keyboard-reachable contained scroll region when their technical columns exceed the main pane.
+- **Accessibility:** source and translated text declare their natural language and use strict CJK line breaking with phrase-aware wrapping. The main workstation pane never receives a horizontal scrollbar from review content.
 
 ### Drawer, dialog, menu, tooltip, and toast
 

@@ -67,7 +67,7 @@ export function StageRail({ executionProgress, onSelectStage, selectedStage, sta
             <li className={`ny-progress__stage ny-progress__stage--${tone}`} key={stageName}>
               <button aria-pressed={selectedStage === stageName} className="ny-progress__stage-button" onClick={() => onSelectStage(stageName)} type="button">
                 <StageIcon tone={tone} />
-                <span>{formatStageLabel(stageName)}</span>
+                <span className="ny-progress__stage-label">{formatStageLabel(stageName)}</span>
                 <span className="ny-sr-only">：{stage?.status ?? "pending"}</span>
               </button>
             </li>
