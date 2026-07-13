@@ -22,8 +22,9 @@ interface TitleSegmenterConstructor {
   new (locales: string, options: { readonly granularity: "word" }): TitleSegmenter;
 }
 
-const cjkCharacter = /\p{Script=Han}/u;
-const cjkPostposition = /^(?:的|地|得|中|中的|里|上|下|内|外|前|后|间|时)$/u;
+const titleCjkCharacter = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const titlePostposition = /^(?:的|地|得|中|中的|里|上|下|内|外|前|后|间|时|の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも|의|은|는|이|가|을|를|에|에서|로|으로|와|과|도|만|까지|부터)$/u;
+const japanesePhraseBridge = /(?:の|に|へ|で|と|から|まで|より|ので|のに)$/u;
 const titlePhraseLengthLimit = 12;
 
 function isTitleSegmenterConstructor(value: unknown): value is TitleSegmenterConstructor {
@@ -38,7 +39,9 @@ function segmentedTaskTitle(title: string): ReactNode {
   const segments = Array.from(new segmenterConstructor("zh-CN", { granularity: "word" }).segment(title), ({ segment }) => segment);
   const phrases = segments.reduce<string[]>((currentPhrases, segment) => {
     const previousPhrase = currentPhrases[currentPhrases.length - 1];
-    if (previousPhrase !== undefined && cjkPostposition.test(segment) && cjkCharacter.test(previousPhrase)) {
+    const combinedLength = previousPhrase === undefined ? 0 : previousPhrase.length + segment.length;
+    const extendsJapanesePhrase = previousPhrase !== undefined && japanesePhraseBridge.test(previousPhrase) && titleCjkCharacter.test(segment);
+    if (previousPhrase !== undefined && combinedLength <= titlePhraseLengthLimit && titleCjkCharacter.test(previousPhrase) && (titlePostposition.test(segment) || extendsJapanesePhrase)) {
       currentPhrases[currentPhrases.length - 1] = `${previousPhrase}${segment}`;
       return currentPhrases;
     }
@@ -46,7 +49,7 @@ function segmentedTaskTitle(title: string): ReactNode {
     return currentPhrases;
   }, []);
 
-  return phrases.map((phrase, index) => cjkCharacter.test(phrase) && phrase.length <= titlePhraseLengthLimit
+  return phrases.map((phrase, index) => titleCjkCharacter.test(phrase) && phrase.length <= titlePhraseLengthLimit
     ? <span className="ny-task-overview__title-phrase" key={`${index}-${phrase}`}>{phrase}</span>
     : phrase);
 }

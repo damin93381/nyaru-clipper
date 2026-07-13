@@ -106,6 +106,17 @@ describe("TaskOverviewPage", () => {
     expect(Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent)).toContain("屏幕中的");
   });
 
+  it("keeps Japanese connective title clauses together without changing the accessible title", async () => {
+    const title = "映像の中にある字幕レビュー";
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
+
+    renderOverview();
+
+    const heading = await screen.findByRole("heading", { name: title });
+    expect(heading).toHaveTextContent(title);
+    expect(Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent)).toContain("映像の中にある");
+  });
+
   it("keeps non-CJK titles readable when the server runtime lacks Intl.Segmenter", async () => {
     const title = "very-long-operator-supplied-title-without-a-segmenter";
     const segmenter = Reflect.get(Intl, "Segmenter");
