@@ -27,7 +27,7 @@ const japaneseCharacter = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const titleContentToken = /[\p{L}\p{N}]/u;
 const titlePostposition = /^(?:的|地|得|中|中的|里|上|下|内|外|前|后|间|时|の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも|의|은|는|이|가|을|를|에|에서|로|으로|와|과|도|만|까지|부터)$/u;
 const japaneseParticle = /^(?:の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも)$/u;
-const japanesePredicateContinuation = /^(?:する|した|して|される|された|されて|ある|いる|なる|なった|できる|できた|ない|たい)$/u;
+const japanesePredicateEnding = /(?:する|した|して|される|された|されて|ある|いる|なる|なった|できる|できた|ない|たい)$/u;
 const titlePhraseLengthLimit = 12;
 
 function isTitleSegmenterConstructor(value: unknown): value is TitleSegmenterConstructor {
@@ -55,7 +55,6 @@ function groupedJapaneseTitlePhrases(segments: readonly string[]): string[] {
 
     const nextSegment = segments[index + 1];
     let unit = segment;
-    let unitEndsWithPredicate = japanesePredicateContinuation.test(segment);
     if (japaneseParticle.test(segment)) {
       if (nextSegment === undefined || !titleContentToken.test(nextSegment)) {
         flushPhrase();
@@ -63,28 +62,25 @@ function groupedJapaneseTitlePhrases(segments: readonly string[]): string[] {
         continue;
       }
       unit = `${segment}${nextSegment}`;
-      unitEndsWithPredicate = japanesePredicateContinuation.test(nextSegment);
       index += 1;
       const predicateSegment = segments[index + 1];
-      if (predicateSegment !== undefined && japanesePredicateContinuation.test(predicateSegment)) {
+      if (predicateSegment !== undefined && japanesePredicateEnding.test(predicateSegment)) {
         unit = `${unit}${predicateSegment}`;
-        unitEndsWithPredicate = true;
         index += 1;
       }
-    } else if (nextSegment !== undefined && japanesePredicateContinuation.test(nextSegment)) {
+    } else if (nextSegment !== undefined && japanesePredicateEnding.test(nextSegment)) {
       unit = `${segment}${nextSegment}`;
-      unitEndsWithPredicate = true;
       index += 1;
     }
 
     if (phrase === "" || (!phraseEndsWithPredicate && phrase.length + unit.length <= titlePhraseLengthLimit)) {
       phrase = `${phrase}${unit}`;
-      phraseEndsWithPredicate = unitEndsWithPredicate;
+      phraseEndsWithPredicate = japanesePredicateEnding.test(phrase);
       continue;
     }
     flushPhrase();
     phrase = unit;
-    phraseEndsWithPredicate = unitEndsWithPredicate;
+    phraseEndsWithPredicate = japanesePredicateEnding.test(phrase);
   }
   flushPhrase();
   return phrases;

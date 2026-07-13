@@ -167,6 +167,22 @@ describe("TaskOverviewPage", () => {
     expect(phrases).not.toContain("映像の");
   });
 
+  it.each([
+    ["字幕を確認して映像の場面", "字幕を確認して"],
+    ["字幕を確認されて映像の場面", "字幕を確認されて"],
+    ["字幕を確認できた映像の場面", "字幕を確認できた"],
+  ])("starts a new phrase after the split Japanese predicate in %s", async (title, predicatePhrase) => {
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
+
+    renderOverview();
+
+    const heading = await screen.findByRole("heading", { name: title });
+    const phrases = Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent);
+    expect(phrases).toContain(predicatePhrase);
+    expect(phrases).toContain("映像の場面");
+    expect(phrases).not.toContain(title);
+  });
+
   it("keeps non-CJK titles readable when the server runtime lacks Intl.Segmenter", async () => {
     const title = "very-long-operator-supplied-title-without-a-segmenter";
     const segmenter = Reflect.get(Intl, "Segmenter");

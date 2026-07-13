@@ -134,6 +134,41 @@ test("moves a Japanese particle with its content at the twelve-character boundar
   await page.screenshot({ path: "/tmp/nyaru-japanese-title-evidence/task-overview-boundary-1280.png", fullPage: true });
 });
 
+test("starts a new title phrase after a split Japanese predicate", async ({ page }) => {
+  const title = "字幕を確認して映像の場面";
+  const predicateOverview = { ...taskOverview, title };
+  await page.setViewportSize({ height: 900, width: 1280 });
+  await page.route("http://127.0.0.1:8000/api/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/v2/tasks/task-e2e-overview") return route.fulfill({ json: predicateOverview });
+    if (pathname.endsWith("asr-segments.json")) return route.fulfill({ json: { segments: [{ id: "seg-0001", start_seconds: 0, end_seconds: 1.5, text: "こんにちは" }] } });
+    if (pathname.endsWith("subtitles.zh-ja.json")) return route.fulfill({ json: { segments: [{ id: "seg-0001", start_seconds: 0, end_seconds: 1.5, text: "こんにちは", translated_text: "字幕" }] } });
+    if (pathname.endsWith("highlight-candidates.json")) return route.fulfill({ json: { candidate_count: 0, candidates: [], no_candidates: "候補はありません" } });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/workstation/tasks/task-e2e-overview");
+
+  const heading = page.getByRole("heading", { name: title });
+  const predicatePhrase = heading.locator(".ny-task-overview__title-phrase", { hasText: "字幕を確認して" });
+  const followingPhrase = heading.locator(".ny-task-overview__title-phrase", { hasText: "映像の場面" });
+  await expect(heading).toBeVisible();
+  await expect(predicatePhrase).toHaveText("字幕を確認して");
+  await expect(followingPhrase).toHaveText("映像の場面");
+  expect(await predicatePhrase.evaluate((node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.getClientRects().length;
+  })).toBe(1);
+  expect(await followingPhrase.evaluate((node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.getClientRects().length;
+  })).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.screenshot({ path: "/tmp/nyaru-japanese-title-evidence/task-overview-predicate-1280.png", fullPage: true });
+});
+
 test("recovers a failed stage and exports a confirmed clip", async ({ page }) => {
   const taskId = "task-e2e-recovery";
   const recoveryOverview = {
