@@ -12,6 +12,7 @@
     "build": "tsc -b && vite build",
     "test": "vitest",
     "test:e2e": "playwright test",
+    "visual:check-png": "node scripts/check-visual-png.mjs",
     "api:export": "${BACKEND_PYTHON:-../backend/.venv/bin/python} ../scripts/export_openapi_schema.py --output openapi.json",
     "api:generate": "pnpm api:export && openapi-typescript openapi.json -o src/generated/api-schema.ts",
     "api:check": "pnpm api:generate && git diff --exit-code -- openapi.json src/generated/api-schema.ts"

@@ -228,8 +228,10 @@
 }
 
 .ny-table tr:hover td, .ny-table tr:focus-within td { background: var(--ny-surface-muted); }
+.ny-table tr:focus-visible { outline: 3px solid var(--ny-focus); outline-offset: -3px; }
 .ny-table tr[aria-selected="true"] td { background: color-mix(in srgb, var(--ny-accent) 10%, var(--ny-surface)); }
 .ny-table__row--warning td { background: color-mix(in srgb, var(--ny-warning) 8%, var(--ny-surface)); }
+.ny-table__row--failed td { background: color-mix(in srgb, var(--ny-danger) 8%, var(--ny-surface)); }
 .ny-table__technical { font-family: var(--ny-font-mono); color: var(--ny-ink-muted); }
 .ny-table__action { min-height: var(--ny-target-min); border: 0; color: var(--ny-focus); cursor: pointer; background: transparent; text-decoration: underline; text-underline-offset: var(--ny-space-1); }
 

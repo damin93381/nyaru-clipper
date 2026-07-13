@@ -43,11 +43,17 @@ describe("PrimitiveShowcasePage", () => {
     expect(screen.getByRole("heading", { name: "进度轨道" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "流水线进度" })).toBeInTheDocument();
     expect(screen.getByText("翻译 · 需要注意")).toHaveAttribute("data-selected", "true");
+    expect(screen.getByText("语音识别 · 处理中")).toHaveClass("ny-progress__stage--running");
+    expect(screen.getByText("高光片段 · 已失败")).toHaveClass("ny-progress__stage--failed");
 
     expect(screen.getByRole("heading", { name: "表格行状态" })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /夏日档案/i })).toHaveAttribute("aria-selected", "true");
+    const selectedRow = screen.getByRole("row", { name: /夏日档案/i });
+    expect(selectedRow).toHaveAttribute("aria-selected", "true");
+    expect(selectedRow).toHaveAttribute("tabindex", "0");
     expect(screen.getByRole("row", { name: /需要人工复核/i })).toHaveClass("ny-table__row--warning");
+    expect(screen.getByRole("row", { name: /导出编码失败/i })).toHaveClass("ny-table__row--failed");
     expect(screen.getByRole("button", { name: "查看夏日档案任务" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "查看失败的导出任务" })).toBeVisible();
 
     expect(screen.getByRole("heading", { name: "浮层" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开侧栏" })).toBeEnabled();
@@ -104,5 +110,17 @@ describe("PrimitiveShowcasePage", () => {
     expect(tooltipTrigger).toHaveAttribute("aria-describedby");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("keeps table rows and actions in the real keyboard focus order", () => {
+    render(<PrimitiveShowcasePage />);
+
+    const selectedRow = screen.getByRole("row", { name: /夏日档案/i });
+    const failedAction = screen.getByRole("button", { name: "查看失败的导出任务" });
+    selectedRow.focus();
+    expect(selectedRow).toHaveFocus();
+
+    failedAction.focus();
+    expect(failedAction).toHaveFocus();
   });
 });

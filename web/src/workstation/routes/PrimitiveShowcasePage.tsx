@@ -11,7 +11,7 @@ import "../design/global.css";
 import "../design/primitives.css";
 
 const stages = ["采集", "媒体准备", "语音识别", "翻译", "高光片段", "导出", "报告"] as const;
-const progressClasses = ["complete", "complete", "complete", "warning", "pending", "pending", "pending"] as const;
+const progressClasses = ["complete", "complete", "running", "warning", "failed", "pending", "pending"] as const;
 
 type FeedbackTone = "loading" | "empty" | "disconnected" | "failure";
 type StampTone = "running" | "success" | "warning" | "failed";
@@ -88,7 +88,8 @@ export function PrimitiveShowcasePage(): ReactNode {
             {stages.map((stage, index) => {
               const tone = progressClasses[index];
               const selected = tone === "warning";
-              return <li aria-current={selected ? "step" : undefined} className={`ny-progress__stage ny-progress__stage--${tone}`} data-selected={selected || undefined} key={stage}>{stage}{selected ? " · 需要注意" : ""}</li>;
+              const stateLabel = tone === "running" ? "处理中" : tone === "warning" ? "需要注意" : tone === "failed" ? "已失败" : null;
+              return <li aria-current={selected ? "step" : undefined} className={`ny-progress__stage ny-progress__stage--${tone}`} data-selected={selected || undefined} key={stage}>{stage}{stateLabel ? ` · ${stateLabel}` : ""}</li>;
             })}
           </ol>
         </section>
@@ -96,9 +97,10 @@ export function PrimitiveShowcasePage(): ReactNode {
         <section className="ny-showcase__section" aria-labelledby="rows-heading">
           <h2 className="ny-showcase__section-heading" id="rows-heading">表格行状态</h2>
           <table className="ny-table"><thead><tr><th>项目</th><th>状态</th><th>运行时间</th><th>操作</th></tr></thead><tbody>
-            <tr aria-selected="true" className="ny-table__row--selected"><td>夏日档案：第七次直播</td><td><StatusStamp label="处理中" tone="running" /></td><td className="ny-table__technical">03:42:18</td><td><button className="ny-table__action" type="button" onClick={() => announce("已打开夏日档案任务")}>查看夏日档案任务</button></td></tr>
+            <tr aria-selected="true" className="ny-table__row--selected" tabIndex={0}><td>夏日档案：第七次直播</td><td><StatusStamp label="处理中" tone="running" /></td><td className="ny-table__technical">03:42:18</td><td><button className="ny-table__action" type="button" onClick={() => announce("已打开夏日档案任务")}>查看夏日档案任务</button></td></tr>
             <tr><td>雨后剪辑：最终导出</td><td><StatusStamp label="已完成" tone="success" /></td><td className="ny-table__technical">00:14:02</td><td><button className="ny-table__action" type="button" onClick={() => announce("已打开最终导出")}>查看最终导出</button></td></tr>
             <tr className="ny-table__row--warning" data-state="warning"><td>需要人工复核：翻译术语</td><td><StatusStamp label="需要注意" tone="warning" /></td><td className="ny-table__technical">00:00:48</td><td><button className="ny-table__action" type="button" onClick={() => announce("已打开翻译术语复核")}>查看复核任务</button></td></tr>
+            <tr className="ny-table__row--failed" data-state="failed"><td>导出编码失败：等待恢复</td><td><StatusStamp label="已失败" tone="failed" /></td><td className="ny-table__technical">00:00:16</td><td><button className="ny-table__action" type="button" onClick={() => announce("已打开失败的导出任务")}>查看失败的导出任务</button></td></tr>
           </tbody></table>
         </section>
 
