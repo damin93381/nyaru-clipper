@@ -54,8 +54,8 @@ async function requireQueueSnapshot(
   throw new QueueApiError(action);
 }
 
-export function getQueue(): Promise<QueueSnapshot> {
-  return requireQueueSnapshot(workstationClient.GET("/api/v2/queue", { parseAs: "json" }), "处理队列无法读取");
+export function getQueue(signal?: AbortSignal): Promise<QueueSnapshot> {
+  return requireQueueSnapshot(workstationClient.GET("/api/v2/queue", { parseAs: "json", signal }), "处理队列无法读取");
 }
 
 export function reorderQueue(orderedTaskIds: readonly string[], expectedRevision: number): Promise<QueueSnapshot> {

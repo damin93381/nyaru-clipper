@@ -134,6 +134,24 @@ describe("QueuePage", () => {
     await waitFor(() => expect(screen.getByText("队列版本 8")).toBeVisible());
   });
 
+  it("aborts an in-flight queue GET when React Query cancels the queue", async () => {
+    let queueRequestSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL) => {
+      if (!(input instanceof Request)) throw new TypeError("openapi client must call fetch with a Request");
+      queueRequestSignal = input.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        input.signal.addEventListener("abort", () => reject(input.signal.reason), { once: true });
+      });
+    });
+
+    const queryClient = await renderQueue();
+    await waitFor(() => expect(queueRequestSignal).toBeDefined());
+
+    await queryClient.cancelQueries({ queryKey: workstationKeys.queue });
+
+    await waitFor(() => expect(queueRequestSignal?.aborted).toBe(true));
+  });
+
   it("disables every queue mutation control while a queue change is pending", async () => {
     const response = deferredResponse();
     let latestSnapshot: QueueSnapshotFixture = queueSnapshot;

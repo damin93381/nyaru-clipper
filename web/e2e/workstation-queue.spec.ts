@@ -1,6 +1,20 @@
 import { expect, test } from "@playwright/test";
 
-const queueSnapshot = {
+type QueueItem = {
+  readonly position: number;
+  readonly priority: number;
+  readonly state: string;
+  readonly task_id: string;
+};
+
+type QueueSnapshot = {
+  readonly active: QueueItem | null;
+  readonly paused: readonly QueueItem[];
+  readonly queued: readonly QueueItem[];
+  readonly revision: number;
+};
+
+const queueSnapshot: QueueSnapshot = {
   active: { position: 0, priority: 0, state: "running", task_id: "task-active" },
   paused: [],
   queued: [
@@ -13,17 +27,23 @@ const queueSnapshot = {
 
 test("reorders only queued work with a real Chrome pointer drag", async ({ page }) => {
   let reorderBody: unknown;
+  let latestQueueSnapshot = queueSnapshot;
   await page.route("**/api/v2/queue**", async (route) => {
     if (route.request().method() === "PUT") {
       reorderBody = route.request().postDataJSON();
-      await route.fulfill({ json: { ...queueSnapshot, queued: [
-        { ...queueSnapshot.queued[1], position: 1 },
-        { ...queueSnapshot.queued[0], position: 2 },
-        queueSnapshot.queued[2],
-      ], revision: 8 } });
+      latestQueueSnapshot = {
+        ...queueSnapshot,
+        queued: [
+          { ...queueSnapshot.queued[1], position: 1 },
+          { ...queueSnapshot.queued[0], position: 2 },
+          queueSnapshot.queued[2],
+        ],
+        revision: 8,
+      };
+      await route.fulfill({ json: latestQueueSnapshot });
       return;
     }
-    await route.fulfill({ json: queueSnapshot });
+    await route.fulfill({ json: latestQueueSnapshot });
   });
 
   await page.goto("/workstation/queue");
@@ -49,4 +69,5 @@ test("reorders only queued work with a real Chrome pointer drag", async ({ page 
 
   await expect.poll(() => reorderBody).toEqual({ expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] });
   await expect(page.getByText("队列版本 8")).toBeVisible();
+  await expect.poll(async () => (await page.locator("section[aria-labelledby='queue-list-title'] table").nth(1).locator("tbody tr").allTextContents()).map((text) => text.match(/task-\w+/)?.[0])).toEqual(["task-second", "task-first", "task-third"]);
 });

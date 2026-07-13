@@ -23,7 +23,7 @@ export function QueuePage(): ReactNode {
   const [announcement, setAnnouncement] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const mutationLockRef = useRef(false);
-  const queueQuery = useQuery({ queryKey: workstationKeys.queue, queryFn: getQueue });
+  const queueQuery = useQuery({ queryKey: workstationKeys.queue, queryFn: ({ signal }) => getQueue(signal) });
 
   async function cancelQueueQueries(): Promise<void> {
     await queryClient.cancelQueries({ queryKey: workstationKeys.queue });
