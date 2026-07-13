@@ -6,6 +6,7 @@ import { AppShell } from "../components/AppShell";
 import { PrimitiveShowcasePage } from "./PrimitiveShowcasePage";
 import { TaskLibraryPage } from "../features/task-library/TaskLibraryPage";
 import { QueuePage } from "../features/queue/QueuePage";
+import { TaskOverviewPage } from "../features/task-overview/TaskOverviewPage";
 
 interface WorkstationRouterProps {
   readonly connectionState: WorkstationConnectionState;
@@ -24,7 +25,8 @@ function WorkspacePage({ title, description }: { readonly title: string; readonl
 function TaskWorkspacePage(): ReactNode {
   const { taskId } = useParams();
 
-  return <WorkspacePage description={`正在准备任务 ${taskId ?? ""} 的工作区快照。`} title="任务概览" />;
+  if (taskId === undefined) return <WorkspacePage description="任务标识无效。" title="任务概览" />;
+  return <TaskOverviewPage taskId={taskId} />;
 }
 
 export function WorkstationRouter({ connectionState }: WorkstationRouterProps): ReactNode {

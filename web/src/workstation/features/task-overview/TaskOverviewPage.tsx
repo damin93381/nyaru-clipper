@@ -1,0 +1,92 @@
+import { CircleCheck, CirclePause, CircleX, LoaderCircle, RotateCw } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+
+import type { ArtifactReadinessRecord, ArtifactRecord } from "../../../lib/types";
+import { ExistingReviewWorkspace } from "./ExistingReviewWorkspace";
+import { getWorkstationTaskOverview } from "./api";
+import { RecoveryPanel } from "./RecoveryPanel";
+import { StageRail } from "./StageRail";
+import { workstationKeys } from "../../api/queryKeys";
+
+interface TaskOverviewPageProps {
+  readonly taskId: string;
+}
+
+function overviewArtifacts(task: Awaited<ReturnType<typeof getWorkstationTaskOverview>>): ArtifactRecord[] {
+  return task.artifacts.map((artifact) => ({
+    id: artifact.artifact_id,
+    kind: artifact.kind,
+    metadata_json: artifact.metadata_json,
+    path: artifact.path,
+    stage_name: artifact.stage_name,
+    task_id: task.task_id,
+  }));
+}
+
+function overviewReadiness(task: Awaited<ReturnType<typeof getWorkstationTaskOverview>>): ArtifactReadinessRecord[] {
+  return task.artifact_readiness.map((artifact) => ({
+    artifact_id: artifact.artifact_id,
+    kind: artifact.kind,
+    path: artifact.path,
+    stage_name: artifact.stage_name,
+    status: artifact.status,
+  }));
+}
+
+function taskStatusCopy(status: string): { readonly label: string; readonly tone: "failed" | "running" | "success" | "warning" } {
+  switch (status) {
+    case "pending": return { label: "等待开始", tone: "warning" };
+    case "running": return { label: "正在处理", tone: "running" };
+    case "success": return { label: "任务已完成", tone: "success" };
+    case "cancelled": return { label: "任务已取消", tone: "warning" };
+    case "failed": return { label: "任务需要恢复", tone: "failed" };
+    default: return { label: status, tone: "warning" };
+  }
+}
+
+function StatusIcon({ tone }: { readonly tone: "failed" | "running" | "success" | "warning" }): ReactNode {
+  switch (tone) {
+    case "failed": return <CircleX aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />;
+    case "running": return <LoaderCircle aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />;
+    case "success": return <CircleCheck aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />;
+    case "warning": return <CirclePause aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />;
+  }
+}
+
+export function TaskOverviewPage({ taskId }: TaskOverviewPageProps): ReactNode {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const overviewQuery = useQuery({ queryKey: workstationKeys.detail(taskId), queryFn: () => getWorkstationTaskOverview(taskId) });
+
+  if (overviewQuery.isPending) {
+    return <section className="ny-workstation-page"><p className="ny-workstation__eyebrow">任务概览</p><h1 className="ny-workstation-page__title">正在读取任务概览</h1><p className="ny-feedback ny-feedback--loading">正在获取阶段、产物与安全日志。</p></section>;
+  }
+  if (overviewQuery.isError || overviewQuery.data === undefined) {
+    return <section className="ny-workstation-page"><p className="ny-workstation__eyebrow">任务概览</p><h1 className="ny-workstation-page__title">任务概览无法读取</h1><button className="ny-button" onClick={() => void overviewQuery.refetch()} type="button"><RotateCw aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />重新读取任务概览</button></section>;
+  }
+
+  const task = overviewQuery.data;
+  const status = taskStatusCopy(task.status);
+  const selectedStage = searchParams.get("stage") ?? task.current_stage;
+  function selectStage(stageName: string): void {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("stage", stageName);
+    setSearchParams(nextSearchParams, { replace: true });
+  }
+  return (
+    <section className="ny-task-overview" aria-labelledby="task-overview-title">
+      <header className="ny-task-overview__header">
+        <div>
+          <p className="ny-workstation__eyebrow">任务概览</p>
+          <h1 className="ny-workstation-page__title" id="task-overview-title">{task.title}</h1>
+          <p className="ny-workstation-page__copy">{task.source_label}</p>
+        </div>
+        <p className={`ny-stamp ny-stamp--${status.tone}`}><StatusIcon tone={status.tone} />{status.label}</p>
+      </header>
+      <StageRail executionProgress={task.execution_progress} onSelectStage={selectStage} selectedStage={selectedStage} stages={task.stages} />
+      <RecoveryPanel actions={task.recovery_actions} taskId={task.task_id} />
+      <ExistingReviewWorkspace artifactReadiness={overviewReadiness(task)} artifacts={overviewArtifacts(task)} taskId={task.task_id} />
+    </section>
+  );
+}

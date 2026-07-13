@@ -327,6 +327,39 @@
 .ny-overview-inspector__technical summary { min-height: var(--ny-target-min); padding: var(--ny-space-2) 0; cursor: pointer; font-family: var(--ny-font-sans); }
 .ny-overview-inspector__technical code { display: block; overflow-wrap: anywhere; }
 
+/* The legacy review behavior is retained inside the workstation overview, but
+   its layout inherits the workstation's ruled-paper material rather than the
+   retired dark application shell. */
+.ny-task-overview .workspace-panel { display: grid; gap: var(--ny-space-5); padding: var(--ny-space-5); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-2); color: var(--ny-ink); background: var(--ny-surface); box-shadow: none; }
+.ny-task-overview .panel__header { display: flex; gap: var(--ny-space-4); align-items: start; justify-content: space-between; }
+.ny-task-overview .eyebrow { margin: 0; color: var(--ny-accent); font-size: var(--ny-font-caption); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.ny-task-overview .panel__header h3, .ny-task-overview .workspace-section h4 { margin: 0; color: var(--ny-ink); font-family: var(--ny-font-serif); font-size: var(--ny-font-section); line-height: var(--ny-line-tight); }
+.ny-task-overview .pill { min-height: var(--ny-target-min); padding: var(--ny-space-2) var(--ny-space-3); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink-muted); background: var(--ny-surface-muted); font-family: var(--ny-font-mono); font-size: var(--ny-font-caption); }
+.ny-task-overview .workspace-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ny-space-4); }
+.ny-task-overview .workspace-section { display: grid; gap: var(--ny-space-4); padding: var(--ny-space-4); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink); background: var(--ny-surface-muted); }
+.ny-task-overview .workspace-section__header, .ny-task-overview .candidate-card__header { display: flex; gap: var(--ny-space-3); align-items: start; justify-content: space-between; }
+.ny-task-overview .subtitle-table, .ny-task-overview .candidate-list, .ny-task-overview .candidate-card, .ny-task-overview .candidate-card__body, .ny-task-overview .candidate-card__controls, .ny-task-overview .workspace-downloads, .ny-task-overview .workspace-empty-state { display: grid; gap: var(--ny-space-3); }
+.ny-task-overview .subtitle-table__header, .ny-task-overview .subtitle-row { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--ny-space-3); align-items: start; }
+.ny-task-overview .subtitle-table__header { padding-bottom: var(--ny-space-3); border-bottom: 1px solid var(--ny-border); color: var(--ny-ink-muted); font-size: var(--ny-font-caption); font-weight: 700; }
+.ny-task-overview .subtitle-row { padding: var(--ny-space-3) 0; border-bottom: 1px solid var(--ny-border); }
+.ny-task-overview .subtitle-row:last-child { border-bottom: 0; }
+.ny-task-overview .subtitle-row p, .ny-task-overview .subtitle-row__meta, .ny-task-overview .candidate-card__body p, .ny-task-overview .workspace-empty-state p { margin: 0; color: var(--ny-ink); font-size: var(--ny-font-body); line-height: var(--ny-line-body); }
+.ny-task-overview .subtitle-row__meta { display: grid; gap: var(--ny-space-1); color: var(--ny-ink-muted); font-family: var(--ny-font-mono); font-size: var(--ny-font-caption); }
+.ny-task-overview .candidate-list { margin: 0; padding: 0; list-style: none; }
+.ny-task-overview .candidate-card, .ny-task-overview .workspace-empty-state { padding: var(--ny-space-4); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink); background: var(--ny-surface); }
+.ny-task-overview .workspace-empty-state { border-left: 3px solid var(--ny-border); }
+.ny-task-overview .workspace-state-card--load_error, .ny-task-overview .workspace-state-card--missing, .ny-task-overview .workspace-state-card--failed { border-left-color: var(--ny-danger); }
+.ny-task-overview .workspace-state-card--loading, .ny-task-overview .workspace-state-card--not_ready { border-left-color: var(--ny-warning); }
+.ny-task-overview .candidate-card__controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ny-task-overview .field { display: grid; gap: var(--ny-space-2); color: var(--ny-ink); font-size: var(--ny-font-body); font-weight: 700; }
+.ny-task-overview .field__input { min-height: var(--ny-target-min); padding: var(--ny-space-2) var(--ny-space-3); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink); background: var(--ny-surface); }
+.ny-task-overview .primary-button, .ny-task-overview .secondary-button { min-height: var(--ny-target-min); padding: var(--ny-space-2) var(--ny-space-3); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink); cursor: pointer; background: var(--ny-surface); font: inherit; }
+.ny-task-overview .primary-button { color: var(--ny-surface); border-color: var(--ny-accent); background: var(--ny-accent); }
+.ny-task-overview .workspace-downloads { grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+.ny-task-overview .download-link { display: grid; gap: var(--ny-space-2); min-height: var(--ny-target-min); padding: var(--ny-space-3); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-focus); background: var(--ny-surface); font-size: var(--ny-font-body); font-weight: 700; text-decoration: none; }
+.ny-task-overview .download-link:hover { border-color: var(--ny-focus); background: var(--ny-surface-muted); }
+.ny-task-overview .support-copy { margin: 0; color: var(--ny-ink-muted); font-size: var(--ny-font-body); line-height: var(--ny-line-body); }
+
 .ny-task-create { grid-template-rows: auto auto minmax(0, 1fr); width: min(480px, calc(100vw - var(--ny-space-8))); overflow: auto; }
 .ny-task-create__header { display: flex; align-items: start; justify-content: space-between; gap: var(--ny-space-4); }
 .ny-task-create__header .ny-button { flex: 0 0 auto; }
