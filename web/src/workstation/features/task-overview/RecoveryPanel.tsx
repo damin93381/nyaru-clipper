@@ -32,7 +32,10 @@ export function RecoveryPanel({ actions, taskId }: RecoveryPanelProps): ReactNod
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: workstationKeys.detail(taskId) }),
   });
   const downloadMutation = useMutation({
-    mutationFn: (modelKeys: ("whisperx" | "alignment")[]) => downloadAsrModels(taskId, modelKeys),
+    mutationFn: async (modelKeys: ("whisperx" | "alignment")[]) => {
+      await downloadAsrModels(taskId, modelKeys);
+      return retryTaskFromStage(taskId, "asr");
+    },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: workstationKeys.detail(taskId) }),
   });
 
@@ -50,9 +53,9 @@ export function RecoveryPanel({ actions, taskId }: RecoveryPanelProps): ReactNod
       <div className="ny-overview__recovery-actions">
         {actions.map((action) => {
           if (action.id === "download_asr_model") {
-            return <button className="ny-button ny-button--primary" disabled={!action.enabled || downloadMutation.isPending} key={action.id} onClick={() => downloadMutation.mutate([...action.payload.model_keys])} type="button"><Download aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />下载缺失模型</button>;
+            return <button className="ny-button ny-button--primary" disabled={!action.enabled || downloadMutation.isPending || retryMutation.isPending} key={action.id} onClick={() => downloadMutation.mutate([...action.payload.model_keys])} type="button"><Download aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />下载缺失模型</button>;
           }
-          return <button className="ny-button" disabled={!action.enabled || retryMutation.isPending || legacyStageName(action.payload.stage_name) === null} key={action.id} onClick={() => retryStage(action.payload.stage_name)} type="button"><RotateCcw aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />从{formatStageLabel(action.payload.stage_name)}重新尝试</button>;
+          return <button className="ny-button" disabled={!action.enabled || downloadMutation.isPending || retryMutation.isPending || legacyStageName(action.payload.stage_name) === null} key={action.id} onClick={() => retryStage(action.payload.stage_name)} type="button"><RotateCcw aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />从{formatStageLabel(action.payload.stage_name)}重新尝试</button>;
         })}
       </div>
       {retryMutation.isError || downloadMutation.isError ? <p className="ny-field__message ny-field__message--error" role="alert">恢复操作没有完成，请检查安全日志后重试。</p> : null}

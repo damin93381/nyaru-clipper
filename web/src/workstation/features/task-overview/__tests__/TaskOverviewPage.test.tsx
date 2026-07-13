@@ -101,7 +101,7 @@ describe("TaskOverviewPage", () => {
     expect(await screen.findByText(label)).toBeVisible();
   });
 
-  it("shows retryable failure and missing-model recovery actions", async () => {
+  it("downloads missing models then retries the trusted ASR stage", async () => {
     vi.mocked(getWorkstationTaskOverview).mockResolvedValue({
       ...overview,
       current_stage: "asr",
@@ -114,7 +114,60 @@ describe("TaskOverviewPage", () => {
     renderOverview();
     fireEvent.click(await screen.findByRole("button", { name: "下载缺失模型" }));
     await waitFor(() => expect(downloadAsrModels).toHaveBeenCalledWith("task-overview", ["whisperx", "alignment"]));
-    fireEvent.click(screen.getByRole("button", { name: "从语音转写重新尝试" }));
+    await waitFor(() => expect(retryTaskFromStage).toHaveBeenCalledWith("task-overview", "asr"));
+    expect(vi.mocked(downloadAsrModels).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(retryTaskFromStage).mock.invocationCallOrder[0]);
+  });
+
+  it("shows a recovery failure when the post-download ASR retry is rejected", async () => {
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({
+      ...overview,
+      current_stage: "asr",
+      recovery_actions: [{ confirmation_required: false, description_key: "download_asr_model", disabled_reason: null, enabled: true, endpoint: "/api/tasks/task-overview/asr/models/download", id: "download_asr_model", label_key: "download_asr_model", method: "POST", payload: { model_keys: ["whisperx"] }, success_behavior: "retry_stage_after_success" }],
+      status: "failed",
+    });
+    vi.mocked(retryTaskFromStage).mockRejectedValueOnce(new Error("ASR 重试请求失败"));
+    renderOverview();
+    fireEvent.click(await screen.findByRole("button", { name: "下载缺失模型" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("恢复操作没有完成，请检查安全日志后重试。");
+    expect(retryTaskFromStage).toHaveBeenCalledWith("task-overview", "asr");
+  });
+
+  it("disables the model download while a manual stage retry is pending", async () => {
+    let resolveRetry: (() => void) | undefined;
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({
+      ...overview,
+      current_stage: "asr",
+      recovery_actions: [
+        { confirmation_required: false, description_key: "download_asr_model", disabled_reason: null, enabled: true, endpoint: "/api/tasks/task-overview/asr/models/download", id: "download_asr_model", label_key: "download_asr_model", method: "POST", payload: { model_keys: ["whisperx"] }, success_behavior: "retry_stage_after_success" },
+        { confirmation_required: false, description_key: "retry_stage", disabled_reason: null, enabled: true, endpoint: "/api/tasks/task-overview/retry", id: "retry_stage", label_key: "retry_stage", method: "POST", payload: { stage_name: "asr" }, success_behavior: "poll_task" },
+      ],
+      status: "failed",
+    });
+    vi.mocked(retryTaskFromStage).mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = () => resolve({ retry_stage: "asr", status: "pending", task_id: "task-overview" }); }));
+    renderOverview();
+    fireEvent.click(await screen.findByRole("button", { name: "从语音转写重新尝试" }));
+    await waitFor(() => expect(retryTaskFromStage).toHaveBeenCalledWith("task-overview", "asr"));
+    expect(screen.getByRole("button", { name: "下载缺失模型" })).toBeDisabled();
+    resolveRetry?.();
+  });
+
+  it("disables manual retry while the model download sequence is pending", async () => {
+    let resolveDownload: (() => void) | undefined;
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({
+      ...overview,
+      current_stage: "asr",
+      recovery_actions: [
+        { confirmation_required: false, description_key: "download_asr_model", disabled_reason: null, enabled: true, endpoint: "/api/tasks/task-overview/asr/models/download", id: "download_asr_model", label_key: "download_asr_model", method: "POST", payload: { model_keys: ["whisperx"] }, success_behavior: "retry_stage_after_success" },
+        { confirmation_required: false, description_key: "retry_stage", disabled_reason: null, enabled: true, endpoint: "/api/tasks/task-overview/retry", id: "retry_stage", label_key: "retry_stage", method: "POST", payload: { stage_name: "asr" }, success_behavior: "poll_task" },
+      ],
+      status: "failed",
+    });
+    vi.mocked(downloadAsrModels).mockImplementationOnce(() => new Promise((resolve) => { resolveDownload = () => resolve({ kind: "missing_model", models: [], stage: "asr" }); }));
+    renderOverview();
+    fireEvent.click(await screen.findByRole("button", { name: "下载缺失模型" }));
+    await waitFor(() => expect(downloadAsrModels).toHaveBeenCalledWith("task-overview", ["whisperx"]));
+    expect(screen.getByRole("button", { name: "从语音转写重新尝试" })).toBeDisabled();
+    resolveDownload?.();
     await waitFor(() => expect(retryTaskFromStage).toHaveBeenCalledWith("task-overview", "asr"));
   });
 
