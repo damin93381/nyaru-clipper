@@ -458,6 +458,28 @@ assert set(runtime.keys()) == {'status', 'detected_profile', 'warnings', 'issue_
 PY
 ```
 
+## Workstation configuration and access
+
+The web root (`/`) is the workstation task library. The desktop cockpit is intended for 1280 px and wider screens. Direct URLs remain available at `/workstation`, `/workstation/queue`, and `/workstation/tasks/<task_id>`; legacy `/tasks/<task_id>` links redirect to the workstation overview.
+
+### Trusted local-media import roots
+
+Local import is opt-in. Set `APP_LOCAL_IMPORT_ROOTS` to one or more comma-separated, existing absolute directories visible to the API and worker:
+
+```bash
+APP_LOCAL_IMPORT_ROOTS=/srv/media/inbox,/srv/media/archive ./scripts/dev_up.sh
+```
+
+The server gives each root an opaque ID and exposes only supported files and safe descendants. The browser never receives the absolute host path. Reference mode requires the source to remain within its configured root until ingest; copy mode creates a task-owned source copy under `data/tasks/<task-id>/raw/`.
+
+### Event stream fallback
+
+The workstation uses `/api/v2/events` for live task, queue, stage, and artifact updates. If the stream cannot reconnect after repeated failures, the browser retains the last snapshot and refreshes active workstation projections every 15 seconds. This is a visibility fallback, not a second worker or a queue-scaling mechanism.
+
+### Trusted-LAN boundary
+
+Bind and expose this service only to the trusted LAN described in this guide. The workstation has no authentication, TLS termination, public-internet hardening, rate limits, or multi-user isolation. Do not add a public reverse proxy or port-forward the service to the internet.
+
 ## Troubleshooting
 
 ### `./scripts/dev_up.sh` fails before the stack is ready

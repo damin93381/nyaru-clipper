@@ -1,65 +1,45 @@
 # 处理流程
 
-## 标准阶段流程
+## 输入与有序执行
+
+一个任务可以来自已检查的 Bilibili 录播，或配置好的受信任导入根目录中的受支持媒体文件。本地任务只记录不透明根目录标识和相对路径：引用模式会在 ingest 时再次解析原文件；复制模式会在下游处理前生成任务自有的源文件副本。
+
+单 worker 每次只领取一个排队任务，并持久化执行标准流程：
 
 ```mermaid
-flowchart TD
-    A[用户提交一个 Bilibili VOD 链接] --> B[创建任务、阶段和一个持久化 TaskJob]
+flowchart LR
+    A[已检查的 Bilibili 录播或受信任本地媒体] --> B[有序任务队列]
     B --> C[ingest]
     C --> D[media_prep]
     D --> E[asr]
     E --> F[translation]
     F --> G[highlight]
-    G --> H[export 阶段先标记为 skipped\n等待用户确认导出切片]
+    G --> H[export 留给确认后的片段]
     H --> I[report]
-    I --> J[任务详情页展示产物与工作区]
-    J --> K{用户是否确认某个高光候选?}
+    I --> J[任务概览与复核工作区]
+    J --> K{是否确认候选?}
     K -->|是| L[POST /api/tasks/{task_id}/clips]
-    L --> M[ffmpeg 导出 MP4 到 /data/tasks/<task_id>/exports]
-    K -->|否| N[任务仅保留字幕、报告和候选数据]
+    L --> M[MP4 写入任务 exports]
+    K -->|否| N[保留字幕、候选和报告]
 ```
 
-说明：
+`highlight` 即使产生零候选也可以成功。`export` 阶段不会自动挑选片段；导出始终由操作员复核后显式触发。
 
-- worker 是单任务、持久化的。
-- 流水线按固定标准阶段顺序运行。
-- 在当前 MVP 中，切片导出是在报告生成后由用户手动触发的后续动作。
-- 即使没有任何候选片段，`highlight` 阶段依然会成功结束。
+## 事件与恢复
 
-## 产物目录树
+v2 工作站 API 会投影任务、队列、阶段和产物变化。浏览器消费 `/api/v2/events` 持久事件流；连续五次重连失败后，会每 15 秒刷新活动工作站快照，直到事件流再次打开。
+
+恢复由后端决定。任务概览可能提供从一个获准阶段重试的操作，或缺少模型时下载所需 ASR 模型再从 ASR 重试的操作。恢复操作绝不会向浏览器暴露任意命令执行能力或主机路径。
+
+## 产物目录
 
 ```text
-/data/
-├── tasks.sqlite3
-└── tasks/
-    └── <task_id>/
-        ├── raw/
-        │   └── source.mp4
-        ├── work/
-        │   ├── asr-input.wav
-        │   ├── asr-alignment-raw.json
-        │   ├── asr-segments.json
-        │   ├── subtitles.zh.srt
-        │   ├── subtitles.zh-ja.json
-        │   ├── subtitles.zh-ja.srt
-        │   └── highlight-candidates.json
-        ├── exports/
-        │   └── clip-<start_ms>-<end_ms>.mp4
-        ├── reports/
-        │   └── task-report.md
-        └── logs/
-            ├── ingest.log
-            ├── media_prep.log
-            ├── asr.log
-            ├── translation.log
-            ├── highlight.log
-            ├── export.log
-            └── report.log
+/data/tasks/<task-id>/
+├── raw/       # 托管源文件，包括复制模式的本地导入
+├── work/      # 预处理音频、转写、双语字幕和候选
+├── exports/   # 仅包含已确认的 MP4 片段
+├── reports/   # task-report.md，包括零候选运行
+└── logs/      # 阶段日志；UI 仅展示安全摘要，不展示主机路径
 ```
 
-说明：
-
-- 在用户确认导出前，`exports/` 目录会保持为空。
-- 即使没有导出任何切片，`reports/task-report.md` 也会由流水线生成。
-- `highlight-candidates.json` 可能包含排序后的候选片段，也可能只包含 `no_candidates` 说明。
-- SQLite 中的产物元数据会指回这些磁盘路径。
+产物元数据会持久化。除非服务器明确重新运行上游阶段，重试会保留其成功产物。

@@ -29,9 +29,9 @@
   --ny-space-12: 48px;
   --ny-target-min: 44px;
 
-  --ny-font-serif: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, serif;
-  --ny-font-sans: Inter, "Noto Sans CJK SC", "Microsoft YaHei UI", "PingFang SC", sans-serif;
-  --ny-font-mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", monospace;
+  --ny-font-serif: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, serif;
+  --ny-font-sans: Inter, "Noto Sans CJK SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --ny-font-mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", "Microsoft YaHei", monospace;
   --ny-font-caption: 12px;
   --ny-font-body: 14px;
   --ny-font-body-lg: 16px;

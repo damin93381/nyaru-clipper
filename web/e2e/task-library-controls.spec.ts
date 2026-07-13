@@ -77,3 +77,44 @@ test("keeps filter checkboxes in the workstation's light paper color scheme", as
   await expect(running).toHaveCSS("background-color", "rgb(164, 60, 46)");
   await expect(running).toHaveCSS("border-top-color", "rgb(164, 60, 46)");
 });
+
+test("searches and paginates a thousand-task library from the default entry", async ({ page }) => {
+  const requests: URL[] = [];
+  const firstPage = {
+    archived_at: null,
+    created_at: "2026-07-10T03:00:00Z",
+    current_stage: "translation",
+    progress_percent: 58,
+    source_kind: "bilibili",
+    source_label: "夏日档案直播",
+    status: "running",
+    storage_bytes: 4_096,
+    tags: ["夏季"],
+    task_id: "task-001",
+    title: "夏日档案直播回放",
+    updated_at: "2026-07-11T03:00:00Z",
+  } as const;
+  const secondPage = { ...firstPage, task_id: "task-026", title: "夏日档案检索结果" } as const;
+  await page.route("**/api/v2/tasks/summary", async (route) => {
+    await route.fulfill({ json: { active: 1, archived: 0, failed: 0, queued: 999, review_required: 0, storage_bytes: 4_096_000 } });
+  });
+  await page.route(/\/api\/v2\/tasks(?:\?.*)?$/, async (route) => {
+    const url = new URL(route.request().url());
+    requests.push(url);
+    const pageNumber = url.searchParams.get("page");
+    const query = url.searchParams.get("query");
+    await route.fulfill({ json: pageNumber === "2"
+      ? { items: [secondPage], page: 2, page_count: 40, page_size: 25, total: 1_000 }
+      : { items: [firstPage], page: 1, page_count: 40, page_size: 25, total: query === "夏日" ? 1_000 : 1_000 } });
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "任务库" })).toBeVisible();
+  await page.getByRole("searchbox", { name: "搜索任务" }).fill("夏日");
+  await expect.poll(() => requests.some((url) => url.searchParams.get("query") === "夏日")).toBe(true);
+  await expect(page.getByText("第 1 / 40 页，共 1000 项")).toBeVisible();
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.getByText("夏日档案检索结果")).toBeVisible();
+  await expect(page).toHaveURL(/\?query=%E5%A4%8F%E6%97%A5&page=2$/);
+  expect(requests.some((url) => url.searchParams.get("query") === "夏日" && url.searchParams.get("page") === "2")).toBe(true);
+});

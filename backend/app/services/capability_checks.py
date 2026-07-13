@@ -19,7 +19,10 @@ def _import_module(module_name: str):
 
 
 def _find_module_spec(module_name: str):
-    return importlib.util.find_spec(module_name)
+    try:
+        return importlib.util.find_spec(module_name)
+    except ModuleNotFoundError:
+        return None
 
 
 def _read_distribution_version(distribution_name: str) -> str | None:

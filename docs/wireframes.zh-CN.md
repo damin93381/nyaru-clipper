@@ -1,144 +1,57 @@
-# 线框图
+# 工作站线框图
 
-以下线框图只描述当前 MVP 已实现的页面和状态。
+批准的桌面架构是暖纸材质的三栏驾驶舱，面向 1280 px 及以上宽度，不是移动端布局。
 
-## 1. 新建任务页
-
-路由：`/`
-
-用途：提交一个已结束的 Bilibili VOD 链接，并进入工作台流程。
+## 任务库（`/` 与 `/workstation`）
 
 ```text
-+----------------------------------------------------------------------------------+
-| Task intake                                                                      |
-| Queue a Bilibili VOD for the canonical workstation pipeline                      |
-+----------------------------------------------------------------------------------+
-| New task                                                           [Single-task] |
-|                                                                                  |
-| Bilibili VOD URL                                                                 |
-| [ https://www.bilibili.com/video/BV........                                 ]    |
-|                                                                                  |
-| Reserved controls                                                                |
-| [x] Translation   Keep bilingual subtitle generation visible                     |
-| [x] Highlight     Keep highlight analysis visible                                |
-| [x] Export        Reserve clip/report export visibility                          |
-|                                                                                  |
-| Visible stages: Translation, Highlight, Export                                  |
-| Navigation: Successful submission goes straight to /tasks/<id>                   |
-|                                                                                  |
-| [ Create task ]                                                                  |
-+----------------------------------------------------------------------------------+
++----------------------+----------------------------------------------+----------------------+
+| Nyaru-Clipper        | [ 新建任务 ]                                  | 上下文检查器         |
+| 任务库                | 任务库                                         | 已选任务 /           |
+| 处理队列              | [ 搜索 ][ 筛选 ][ 标签 ][ 每页数量 ]           | 活动 GPU 作业         |
+|                      +----------------------------------------------+                      |
+|                      | 操作表：任务 / 来源 / 状态 / 进度 / 更新时间 / | 安全元数据，          |
+|                      | 存储；[批量操作]                    [分页]     | 不显示主机路径        |
++----------------------+----------------------------------------------+----------------------+
 ```
 
-说明：
+加载、空、断连和失败状态都使用文字优先的反馈面板。密集表格保留任务上下文，并仅在需要时在内部横向滚动。
 
-- 唯一必填项是 VOD 链接。
-- 这些开关在当前 MVP 中只在前端可见，不会改变后端行为。
-- 提交成功后会直接跳转到任务详情页。
-
-## 2. 任务详情页：运行中状态
-
-路由：`/tasks/:taskId`
-
-用途：在 worker 仍在处理中时，观察标准阶段时间线。
+## 队列（`/workstation/queue`）
 
 ```text
-+----------------------------------------------------------------------------------+
-| Task detail                                                   [running] [BV....] |
-| https://www.bilibili.com/video/BV....                                           |
-+---------------------------------------------+------------------------------------+
-| Canonical pipeline                           | Artifacts                          |
-| Stage timeline                               | Artifact overview                  |
-|                                              |                                    |
-| 1. ingest       [success] Attempts: 1        | source metadata                    |
-| 2. media_prep   [success] Attempts: 1        | source video                       |
-| 3. asr          [running] Attempts: 1        | asr audio                          |
-| 4. translation  [pending] Attempts: 0        | ...                                |
-| 5. highlight    [pending] Attempts: 0        |                                    |
-| 6. export       [pending] Attempts: 0        |                                    |
-| 7. report       [pending] Attempts: 0        |                                    |
-+---------------------------------------------+------------------------------------+
-| Workspace                                                                        |
-| Subtitle rows and highlight cards appear here after artifacts are ready.         |
-+----------------------------------------------------------------------------------+
++----------------------+----------------------------------------------+----------------------+
+| 导航                  | 队列版本 n                                    | 已选队列项           |
+|                      | 活动作业（不可移动）                           | 任务 ID、状态、       |
+|                      | 等待行 [拖动] [键盘操作菜单]                   | 位置、优先级          |
+|                      | 已暂停行                                       |                      |
+|                      | 冲突 → 权威顺序 + 状态文字                     |                      |
++----------------------+----------------------------------------------+----------------------+
 ```
 
-说明：
+只有等待中的任务可以移动。鼠标和键盘排序共用同一套插入位置和更新中状态。
 
-- 任务运行中时轮询更频繁。
-- 产物卡片会随着持久化结果写入而出现。
-- 工作区保持在同一页面内，而不是跳到新的路由。
-
-## 3. 任务详情页：失败状态
-
-路由：`/tasks/:taskId`
-
-用途：显示失败阶段，同时保留上游阶段的成功结果。
+## 任务概览（`/workstation/tasks/:taskId`）
 
 ```text
-+----------------------------------------------------------------------------------+
-| Task detail                                                    [failed] [BV....] |
-| https://www.bilibili.com/video/BV....                                           |
-+----------------------------------------------------------------------------------+
-| Readable failure summary                                                          |
-| Translation stage failed                                                          |
-| WhisperX model unavailable, or translation runtime failed, or other stage error. |
-| Retry-ready from translation. Upstream successes remain intact.                   |
-+---------------------------------------------+------------------------------------+
-| Canonical pipeline                           | Artifacts                          |
-| ingest       [success]                       | Already generated artifacts stay   |
-| media_prep   [success]                       | visible and downloadable.          |
-| asr          [success]                       |                                    |
-| translation  [failed]                        |                                    |
-| highlight    [pending]                       |                                    |
-| export       [pending]                       |                                    |
-| report       [pending]                       |                                    |
-+----------------------------------------------------------------------------------+
++----------------------+----------------------------------------------+----------------------+
+| 导航                  | 任务标题 / 状态                                | 安全日志与阶段产物    |
+|                      | 七阶段进度轨                                   |                      |
+|                      | 后端提供时才显示恢复操作                       |                      |
+|                      | 字幕（受控滚动）                               |                      |
+|                      | 排名候选 → [确认导出]                          |                      |
+|                      | 下载与已导出的 MP4                             |                      |
++----------------------+----------------------------------------------+----------------------+
 ```
 
-说明：
+阶段进度轨会选择检查器上下文。缺模型或重试操作只会在后端提供时显示。旧 `/tasks/:taskId` 链接会重定向到这里。
 
-- UI 会展示可读的失败摘要。
-- 当前 MVP 中没有重试按钮。
-- 操作人员需要借助日志与 retry API / 后端流程处理。
-
-## 4. 工作区：复核与导出状态
-
-路由：`/tasks/:taskId`
-
-用途：复核双语字幕，确认高光候选，并下载结果。
+## 新建任务抽屉
 
 ```text
-+----------------------------------------------------------------------------------+
-| Workspace                                                                        |
-+---------------------------------------------+------------------------------------+
-| Subtitles                                   | Highlight candidates               |
-| Segment | Chinese | Bilingual               | Rank 1  Score 0.87                 |
-| seg-001 | ......  | ......                  | Reasons: subtitle density, ...     |
-| seg-002 | ......  | ......                  | Default range: 120.000s -> 168.000s|
-| ...                                         | Start (s) [120.000] End (s) [168.000]|
-|                                             | [ Confirm export ]                 |
-+---------------------------------------------+------------------------------------+
-| Downloads                                                                        |
-| [Download Chinese subtitles] [Download bilingual subtitles] [Download task report]|
-+----------------------------------------------------------------------------------+
-| Exported clips                                                                    |
-| clip-00120000-00168000.mp4  Candidate 7  [Download exported clip]               |
-+----------------------------------------------------------------------------------+
+选择来源 → 已检查的 Bilibili 预览或受信任本地目录
+         → 引用原文件 / 复制到任务存储
+         → Standard 配置 + 优先级 → 创建任务 → 任务概览
 ```
 
-零候选变体：
-
-```text
-+--------------------------------------------------------------+
-| Highlight candidates                                         |
-| No highlight candidates available                            |
-| No highlight candidates cleared the current scoring threshold.|
-+--------------------------------------------------------------+
-```
-
-说明：
-
-- 字幕复核和高光确认共用同一块工作区。
-- 只有在用户点击 **Confirm export** 后，才会真正开始切片导出。
-- 即便是零候选状态，下载区域仍然可见。
+抽屉会限制焦点、关闭后归还焦点、在放弃脏草稿前确认，并在字段旁保留映射后的服务器错误和用户输入。

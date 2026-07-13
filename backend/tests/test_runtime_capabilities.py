@@ -112,12 +112,25 @@ def _patch_all_dependencies_available(monkeypatch) -> None:
         return SimpleNamespace(__version__="1.0.0")
 
     monkeypatch.setattr("app.services.capability_checks._import_module", _fake_import_module)
+    monkeypatch.setattr("app.services.capability_checks._find_module_spec", lambda module_name: object())
 
 
 def _issue_codes(payload: dict[str, object]) -> list[str]:
     issues = payload.get("issues")
     assert isinstance(issues, list)
     return [issue["code"] for issue in issues]
+
+
+def test_find_module_spec_treats_missing_parent_package_as_unavailable(monkeypatch) -> None:
+    from app.services.capability_checks import _find_module_spec
+
+    def _raise_missing_parent(module_name: str):
+        assert module_name == "pyannote.audio"
+        raise ModuleNotFoundError("No module named 'pyannote'")
+
+    monkeypatch.setattr("app.services.capability_checks.importlib.util.find_spec", _raise_missing_parent)
+
+    assert _find_module_spec("pyannote.audio") is None
 
 
 def test_detect_runtime_profile_classifies_linux_cuda_from_runtime_facts(monkeypatch) -> None:
@@ -547,6 +560,7 @@ def test_get_runtime_capabilities_reports_error_when_core_python_library_is_miss
         return SimpleNamespace(__version__="1.0.0")
 
     monkeypatch.setattr("app.services.capability_checks._import_module", _fake_import_module)
+    monkeypatch.setattr("app.services.capability_checks._find_module_spec", lambda module_name: object())
 
     payload = get_runtime_capabilities()
 
@@ -589,6 +603,7 @@ def test_get_runtime_capabilities_reports_error_when_core_python_library_fails_t
         return SimpleNamespace(__version__="1.0.0")
 
     monkeypatch.setattr("app.services.capability_checks._import_module", _fake_import_module)
+    monkeypatch.setattr("app.services.capability_checks._find_module_spec", lambda module_name: object())
 
     payload = get_runtime_capabilities()
 

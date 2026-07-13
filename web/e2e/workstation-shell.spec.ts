@@ -17,3 +17,19 @@ test("keeps legacy routes dark while workstation navigation has a three-pixel fo
   expect(await queueLink.evaluate((link) => getComputedStyle(link).outlineWidth)).toBe("3px");
   expect(await queueLink.evaluate((link) => getComputedStyle(link).outlineStyle)).toBe("solid");
 });
+
+test("redirects a legacy task URL to its workstation overview", async ({ page }) => {
+  await page.goto("/tasks/task-legacy-compatibility");
+  await expect(page).toHaveURL(/\/workstation\/tasks\/task-legacy-compatibility$/);
+});
+
+test("returns keyboard focus to the task-creation trigger after closing its drawer", async ({ page }) => {
+  await page.goto("/workstation");
+  const trigger = page.getByRole("button", { name: "新建任务" });
+
+  await trigger.click();
+  await expect(page.getByRole("dialog", { name: "新建任务" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭新建任务" }).click();
+
+  await expect(trigger).toBeFocused();
+});

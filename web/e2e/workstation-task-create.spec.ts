@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("creates an inspected Bilibili task through the production drawer", async ({ page }) => {
   let createBody: unknown;
-  await page.route("**/api/**", async (route) => {
+  await page.route("http://127.0.0.1:8000/api/**", async (route) => {
     const request = route.request();
     const method = request.method();
     const pathname = new URL(request.url()).pathname;
@@ -47,4 +47,58 @@ test("creates an inspected Bilibili task through the production drawer", async (
 
   await expect(page).toHaveURL(/\/workstation\/tasks\/task-e2e-created$/);
   expect(createBody).toEqual({ priority: 4, profile_id: "standard", source: { kind: "bilibili", url: "https://www.bilibili.com/video/BV1e2ecreate" } });
+});
+
+test("creates a referenced local-file task from a trusted root", async ({ page }) => {
+  let createBody: unknown;
+  await page.route("http://127.0.0.1:8000/api/**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === "/api/v2/tasks" && request.method() === "POST") {
+      createBody = request.postDataJSON();
+      await route.fulfill({ json: { priority: 0, profile_id: "standard", status: "pending", task_id: "task-local-reference" }, status: 201 });
+      return;
+    }
+    if (pathname === "/api/v2/sources/local") {
+      const rootId = new URL(request.url()).searchParams.get("root_id");
+      await route.fulfill({ json: rootId === null
+        ? { entries: [], relative_path: "", root_id: null, roots: [{ id: "trusted-media", name: "受信任媒体" }] }
+        : { entries: [{ kind: "file", name: "episode-01.mp4", relative_path: "archive/episode-01.mp4" }], relative_path: "", root_id: "trusted-media", roots: [{ id: "trusted-media", name: "受信任媒体" }] } });
+      return;
+    }
+    if (pathname === "/api/v2/processing-profiles") {
+      await route.fulfill({ json: { profiles: [{ id: "standard", name: "Standard", stages: ["ingest", "media_prep", "asr"] }] } });
+      return;
+    }
+    if (pathname === "/api/v2/tasks/summary") {
+      await route.fulfill({ json: { active: 0, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 0 } });
+      return;
+    }
+    if (pathname === "/api/v2/tasks") {
+      await route.fulfill({ json: { items: [], page: 1, page_count: 1, page_size: 50, total: 0 } });
+      return;
+    }
+    if (pathname === "/api/v2/queue") {
+      await route.fulfill({ json: { active: null, paused: [], queued: [], revision: 1 } });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+
+  await page.goto("/workstation");
+  await page.getByRole("button", { name: "新建任务" }).click();
+  await page.getByRole("button", { name: "本地文件" }).click();
+  await page.getByRole("button", { name: "受信任媒体" }).click();
+  await page.getByRole("button", { name: "episode-01.mp4" }).click();
+  await expect(page.getByRole("region", { name: "已选本地来源" })).toContainText("episode-01.mp4");
+  await expect(page.getByRole("radio", { name: "引用原始文件" })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("button", { name: "继续设置" }).click();
+  await page.getByRole("button", { name: "创建任务" }).click();
+
+  await expect(page).toHaveURL(/\/workstation\/tasks\/task-local-reference$/);
+  expect(createBody).toEqual({
+    priority: 0,
+    profile_id: "standard",
+    source: { import_mode: "reference", kind: "local", relative_path: "archive/episode-01.mp4", root_id: "trusted-media" },
+  });
 });

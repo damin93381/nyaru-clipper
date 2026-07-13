@@ -458,6 +458,28 @@ assert set(runtime.keys()) == {'status', 'detected_profile', 'warnings', 'issue_
 PY
 ```
 
+## 工作站配置与访问
+
+Web 根路径（`/`）就是工作站任务库。桌面驾驶舱面向 1280 px 及以上宽度。仍可直接访问 `/workstation`、`/workstation/queue` 和 `/workstation/tasks/<task_id>`；旧 `/tasks/<task_id>` 链接会重定向到工作站任务概览。
+
+### 受信任本地媒体导入根目录
+
+本地导入默认关闭。请把 `APP_LOCAL_IMPORT_ROOTS` 设置为 API 与 worker 都可见的、已存在的绝对目录；多个目录用逗号分隔：
+
+```bash
+APP_LOCAL_IMPORT_ROOTS=/srv/media/inbox,/srv/media/archive ./scripts/dev_up.sh
+```
+
+服务端会为每个根目录分配不透明 ID，并只暴露受支持文件及安全子目录。浏览器绝不会拿到主机绝对路径。引用模式要求源文件在 ingest 前一直留在配置根目录中；复制模式会在 `data/tasks/<task-id>/raw/` 下创建任务自有源文件副本。
+
+### 事件流后备刷新
+
+工作站通过 `/api/v2/events` 接收任务、队列、阶段和产物的实时更新。重复重连失败后，浏览器会保留最后的快照，并每 15 秒刷新活动工作站投影。这是可见性后备机制，不会创建第二个 worker，也不会扩展队列并发。
+
+### 受信任局域网边界
+
+只能按本指南所述，在受信任局域网内绑定和暴露服务。工作站没有认证、TLS 终止、公网加固、限流或多用户隔离。不要添加公网反向代理，也不要把服务端口转发到互联网。
+
 ## 排障
 
 ### `./scripts/dev_up.sh` 没有把栈成功拉起

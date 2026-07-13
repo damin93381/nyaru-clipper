@@ -121,3 +121,42 @@ test("selects a queue entry with Enter and updates the persistent inspector URL"
   await expect(page.getByRole("complementary", { name: "上下文检查器" }).getByRole("heading", { name: "已选队列项" })).toBeVisible();
   await expect(selectionAction).toHaveAttribute("aria-pressed", "true");
 });
+
+test("rolls back a conflicting queue reorder to the authoritative order", async ({ page }) => {
+  const conflictSnapshot: QueueSnapshot = {
+    ...queueSnapshot,
+    queued: [
+      { ...queueSnapshot.queued[2], position: 1 },
+      { ...queueSnapshot.queued[0], position: 2 },
+      { ...queueSnapshot.queued[1], position: 3 },
+    ],
+    revision: 8,
+  };
+  let reorderBody: unknown;
+  let returnedConflict = false;
+  await page.route("**/api/v2/queue**", async (route) => {
+    if (route.request().method() === "PUT") {
+      reorderBody = route.request().postDataJSON();
+      returnedConflict = true;
+      await route.fulfill({ json: conflictSnapshot, status: 409 });
+      return;
+    }
+    await route.fulfill({ json: returnedConflict ? conflictSnapshot : queueSnapshot });
+  });
+
+  await page.goto("/workstation/queue");
+  await page.getByRole("button", { name: "task-first 操作" }).click();
+  await page.getByRole("menuitem", { name: "下移" }).click();
+
+  await expect.poll(() => reorderBody).toEqual({ expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] });
+  await expect(page.getByText("队列已在其他操作中变化，已恢复最新顺序。")).toHaveAttribute("role", "status");
+  await expect(page.getByText("队列版本 8")).toBeVisible();
+  await expect(page.getByRole("row", { name: /task-third/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /task-first/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /task-second/ })).toBeVisible();
+  expect(await page.getByRole("row").allTextContents()).toEqual(expect.arrayContaining([
+    expect.stringMatching(/task-third/),
+    expect.stringMatching(/task-first/),
+    expect.stringMatching(/task-second/),
+  ]));
+});

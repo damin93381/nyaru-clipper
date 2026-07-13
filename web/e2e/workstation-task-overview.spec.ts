@@ -39,7 +39,7 @@ const taskOverview = {
 } as const;
 
 test("renders the task overview and selected-stage inspector in production Chrome", async ({ page }) => {
-  await page.route("**/api/**", async (route) => {
+  await page.route("http://127.0.0.1:8000/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/v2/tasks/task-e2e-overview") return route.fulfill({ json: taskOverview });
     if (pathname.endsWith("asr-segments.json")) return route.fulfill({ json: { segments: [{ id: "seg-0001", start_seconds: 0, end_seconds: 1.5, text: "你好，欢迎来到单用户剪辑工作站。" }] } });
@@ -68,4 +68,45 @@ test("renders the task overview and selected-stage inspector in production Chrom
   await expect(page).toHaveURL(/stage=translation$/);
   await expect(page.getByRole("complementary", { name: "上下文检查器" }).getByText("双语字幕数据")).toBeVisible();
   await page.screenshot({ path: "/tmp/nyaru-task13-evidence/overview-stage-selected.png", fullPage: true });
+});
+
+test("recovers a failed stage and exports a confirmed clip", async ({ page }) => {
+  const taskId = "task-e2e-recovery";
+  const recoveryOverview = {
+    ...taskOverview,
+    artifacts: [{ artifact_id: 7, created_at: "2026-07-12T03:00:00Z", kind: "highlight_candidates_json", metadata_json: "{}", path: `/api/tasks/${taskId}/artifacts/7/content/highlight-candidates.json`, stage_name: "highlight" }],
+    artifact_readiness: [{ artifact_id: 7, kind: "highlight_candidates_json", path: `/api/tasks/${taskId}/artifacts/7/content/highlight-candidates.json`, stage_name: "highlight", status: "ready" }],
+    current_stage: "translation",
+    recovery_actions: [{ confirmation_required: false, description_key: "retry_stage", disabled_reason: null, enabled: true, endpoint: `/api/tasks/${taskId}/retry`, id: "retry_stage", label_key: "retry_stage", method: "POST", payload: { stage_name: "translation" }, success_behavior: "retry_stage" }],
+    stages: taskOverview.stages.map((stage) => stage.name === "translation" ? { ...stage, failure_code: "translation_failed", status: "failed", summary: "翻译阶段需要恢复" } : stage),
+    status: "failed",
+    task_id: taskId,
+    title: "失败恢复与导出验证",
+  } as const;
+  let retryBody: unknown;
+  let exportBody: unknown;
+  await page.route("http://127.0.0.1:8000/api/**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === `/api/v2/tasks/${taskId}`) return route.fulfill({ json: recoveryOverview });
+    if (pathname === `/api/tasks/${taskId}/retry`) {
+      retryBody = request.postDataJSON();
+      return route.fulfill({ json: { status: "accepted", task_id: taskId } });
+    }
+    if (pathname === `/api/tasks/${taskId}/clips`) {
+      exportBody = request.postDataJSON();
+      return route.fulfill({ json: { artifact_id: 44, candidate_id: 9, end_s: 18, filename: "clip-12-18.mp4", path: `/api/tasks/${taskId}/artifacts/44/content/clip-12-18.mp4`, start_s: 12 } });
+    }
+    if (pathname.endsWith("highlight-candidates.json")) return route.fulfill({ json: { candidate_count: 1, candidates: [{ candidate_id: 9, default_range: { end_s: 18, start_s: 12 }, end_s: 18, rank: 1, reasons: ["subtitle_density"], score: 0.91, start_s: 12 }] } });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto(`/workstation/tasks/${taskId}`);
+  await expect(page.getByRole("heading", { name: "失败恢复与导出验证" })).toBeVisible();
+  await page.getByRole("button", { name: "从翻译重新尝试" }).click();
+  await expect.poll(() => retryBody).toEqual({ stage_name: "translation" });
+  await page.getByRole("button", { name: "确认导出" }).click();
+  await expect.poll(() => exportBody).toEqual({ candidate_id: 9, end_s: 18, start_s: 12 });
+  await expect(page.getByText("clip-12-18.mp4")).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载已导出片段" })).toHaveAttribute("href", /clip-12-18\.mp4$/);
 });
