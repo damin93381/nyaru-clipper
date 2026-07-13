@@ -100,6 +100,37 @@ def test_task_library_list_filters_updated_date_and_artifact_readiness(client: T
     assert [item["task_id"] for item in response.json()["items"]] == ["task-pending"]
 
 
+def test_task_library_readiness_filters_treat_deleted_artifact_files_as_missing(client: TestClient, tmp_path) -> None:
+    # Given: a successful stage whose persisted artifact path was deleted from storage.
+    from app.db import session_scope
+    from app.models import Artifact, TaskStage
+
+    deleted_artifact_path = tmp_path / "deleted-transcript.json"
+    deleted_artifact_path.write_text("{}", encoding="utf-8")
+    deleted_artifact_path.unlink()
+    with session_scope() as session:
+        _seed_task(session, task_id="task-deleted-artifact", status="success")
+        session.add_all(
+            [
+                TaskStage(task_id="task-deleted-artifact", name="asr", status="success"),
+                Artifact(
+                    task_id="task-deleted-artifact",
+                    stage_name="asr",
+                    kind="transcript_json",
+                    path=str(deleted_artifact_path),
+                ),
+            ]
+        )
+
+    # When: the task library filters by artifact readiness.
+    missing_response = client.get("/api/v2/tasks", params={"readiness": "missing"})
+    ready_response = client.get("/api/v2/tasks", params={"readiness": "ready"})
+
+    # Then: the deleted artifact is missing and cannot be reported as ready.
+    assert [item["task_id"] for item in missing_response.json()["items"]] == ["task-deleted-artifact"]
+    assert [item["task_id"] for item in ready_response.json()["items"]] == []
+
+
 def test_task_library_summary_and_missing_overview_are_exposed(client: TestClient) -> None:
     # Given: a library with one queued task.
     from app.db import session_scope

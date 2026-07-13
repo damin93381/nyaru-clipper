@@ -194,10 +194,12 @@ def _readiness_condition(readiness: str) -> object:
             for stage_name, (_, stored_kinds) in _EXPECTED_ARTIFACTS.items()
         )
     )
+    artifact_path_exists = func.artifact_path_exists(Artifact.path) == 1
     ready_artifact = exists(
         select(Artifact.id)
         .where(Artifact.task_id == Task.id)
         .where(artifact_matches_own_stage)
+        .where(artifact_path_exists)
     )
     failed_stage = exists(
         select(TaskStage.id).where(TaskStage.task_id == Task.id).where(TaskStage.status == "failed")
@@ -213,6 +215,7 @@ def _readiness_condition(readiness: str) -> object:
                 .where(Artifact.task_id == Task.id)
                 .where(Artifact.stage_name == TaskStage.name)
                 .where(artifact_matches_current_stage)
+                .where(artifact_path_exists)
             )
         )
     )

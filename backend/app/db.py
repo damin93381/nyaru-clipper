@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -10,6 +10,16 @@ from typing import Iterator
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.paths import get_data_dir
+
+
+def _artifact_path_exists(path: str) -> int:
+    """Return the filesystem availability signal used by artifact-readiness projections."""
+    return int(Path(path).exists())
+
+
+def _register_sqlite_functions(dbapi_connection, _connection_record) -> None:
+    """Register SQLite functions required by repository projections on each connection."""
+    dbapi_connection.create_function("artifact_path_exists", 1, _artifact_path_exists)
 
 
 def get_database_url() -> str:
@@ -22,7 +32,10 @@ def get_engine():
     if database_url.startswith("sqlite:///"):
         db_path = Path(database_url.replace("sqlite:///", "", 1))
         db_path.parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(database_url, connect_args={"check_same_thread": False})
+    engine = create_engine(database_url, connect_args={"check_same_thread": False})
+    if database_url.startswith("sqlite"):
+        event.listen(engine, "connect", _register_sqlite_functions)
+    return engine
 
 
 def reset_db_runtime() -> None:
