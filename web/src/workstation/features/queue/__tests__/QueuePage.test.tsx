@@ -39,6 +39,34 @@ function openQueueMenu(taskId: string): void {
   fireEvent.keyDown(trigger, { key: "ArrowDown" });
 }
 
+function queueRowRectangle(top: number): DOMRect {
+  return {
+    bottom: top + 40,
+    height: 40,
+    left: 0,
+    right: 800,
+    toJSON: () => ({}),
+    top,
+    width: 800,
+    x: 0,
+    y: top,
+  } satisfies DOMRect;
+}
+
+function installQueueRowLayout(): void {
+  const topByTaskId = new Map([
+    ["task-first", 0],
+    ["task-second", 48],
+    ["task-third", 96],
+  ]);
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getBoundingClientRect(this: HTMLElement): DOMRect {
+    const dragHandle = this.closest("tr")?.querySelector<HTMLButtonElement>("button[aria-label^='拖动 ']");
+    const taskId = dragHandle?.getAttribute("aria-label")?.replace("拖动 ", "");
+    const top = taskId === undefined ? undefined : topByTaskId.get(taskId);
+    return queueRowRectangle(top ?? -48);
+  });
+}
+
 async function queueRequest(input: RequestInfo | URL, init?: RequestInit): Promise<{ readonly body: unknown; readonly method: string; readonly url: URL }> {
   if (input instanceof Request) {
     return {
@@ -85,6 +113,27 @@ describe("QueuePage", () => {
     await waitFor(() => expect(screen.getByText("队列版本 8")).toBeVisible());
   });
 
+  it("disables every queue mutation control while a queue change is pending", async () => {
+    const response = deferredResponse();
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = await queueRequest(input, init);
+      if (request.url.pathname.endsWith("/order")) return response.promise;
+      return jsonResponse(queueSnapshot);
+    });
+
+    await renderQueue();
+    await screen.findByRole("button", { name: "task-first 操作" });
+    openQueueMenu("task-first");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "下移" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "拖动 task-second" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "task-third 操作" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "拖动 task-active" })).toBeDisabled();
+
+    response.resolve(jsonResponse({ ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "拖动 task-second" })).toBeEnabled());
+  });
+
   it("reorders queued work through keyboard-only menu controls", async () => {
     const requests: { body: unknown; method: string; url: URL }[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -102,6 +151,50 @@ describe("QueuePage", () => {
 
     await waitFor(() => expect(requests.some((request) => request.url.pathname.endsWith("/order"))).toBe(true));
     expect(screen.getAllByRole("row").map((row) => row.textContent).join(" ")).toMatch(/task-second[\s\S]*task-first/);
+  });
+
+  it("reorders queued work through the dnd-kit pointer sensor without moving the active entry", async () => {
+    const requests: { body: unknown; method: string; url: URL }[] = [];
+    installQueueRowLayout();
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = await queueRequest(input, init);
+      requests.push(request);
+      if (request.url.pathname.endsWith("/order")) return jsonResponse({ ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] });
+      return jsonResponse(queueSnapshot);
+    });
+
+    await renderQueue();
+    const firstHandle = await screen.findByRole("button", { name: "拖动 task-first" });
+    expect(screen.getByRole("button", { name: "拖动 task-active" })).toBeDisabled();
+
+    fireEvent.pointerDown(firstHandle, { button: 0, clientX: 20, clientY: 20, isPrimary: true, pointerId: 1 });
+    fireEvent.pointerMove(document, { clientX: 20, clientY: 68, isPrimary: true, pointerId: 1 });
+    await waitFor(() => expect(firstHandle).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.pointerMove(document, { clientX: 20, clientY: 68, isPrimary: true, pointerId: 1 });
+    fireEvent.pointerUp(document, { clientX: 20, clientY: 68, isPrimary: true, pointerId: 1 });
+
+    await waitFor(() => expect(requests).toContainEqual(expect.objectContaining({ body: { expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] }, method: "PUT" })));
+  });
+
+  it("reorders queued work through the dnd-kit keyboard sensor", async () => {
+    const requests: { body: unknown; method: string; url: URL }[] = [];
+    installQueueRowLayout();
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = await queueRequest(input, init);
+      requests.push(request);
+      if (request.url.pathname.endsWith("/order")) return jsonResponse({ ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] });
+      return jsonResponse(queueSnapshot);
+    });
+
+    await renderQueue();
+    const firstHandle = await screen.findByRole("button", { name: "拖动 task-first" });
+
+    fireEvent.keyDown(firstHandle, { code: "Space", key: " " });
+    await waitFor(() => expect(firstHandle).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.keyDown(document, { code: "ArrowDown", key: "ArrowDown" });
+    fireEvent.keyDown(document, { code: "Space", key: " " });
+
+    await waitFor(() => expect(requests).toContainEqual(expect.objectContaining({ body: { expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] }, method: "PUT" })));
   });
 
   it("promotes, pauses, and resumes an entry through explicit menu actions", async () => {

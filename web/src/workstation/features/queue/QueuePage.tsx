@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RotateCw } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { QueueConflictError, getQueue, reorderQueue, reorderSnapshot, setQueueItemState } from "./api";
@@ -22,6 +22,7 @@ export function QueuePage(): ReactNode {
   const queryClient = useQueryClient();
   const [announcement, setAnnouncement] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const mutationLockRef = useRef(false);
   const queueQuery = useQuery({ queryKey: workstationKeys.queue, queryFn: getQueue });
   const reorderMutation = useMutation<QueueSnapshot, Error, ReorderVariables, ReorderContext>({
     mutationFn: ({ expectedRevision, orderedTaskIds }) => reorderQueue(orderedTaskIds, expectedRevision),
@@ -40,19 +41,26 @@ export function QueuePage(): ReactNode {
       if (context?.previous !== undefined) queryClient.setQueryData(workstationKeys.queue, context.previous);
       setAnnouncement("队列排序没有保存，请重试。");
     },
+    onSettled: () => { mutationLockRef.current = false; },
   });
   const stateMutation = useMutation({
     mutationFn: ({ state, taskId }: { readonly state: QueueState; readonly taskId: string }) => setQueueItemState(taskId, state),
     onSuccess: (snapshot) => queryClient.setQueryData(workstationKeys.queue, snapshot),
     onError: () => setAnnouncement("队列状态没有保存，请重试。"),
+    onSettled: () => { mutationLockRef.current = false; },
   });
 
   function reorder(orderedTaskIds: readonly string[]): void {
+    if (mutationLockRef.current) return;
     const snapshot = queryClient.getQueryData<QueueSnapshot>(workstationKeys.queue);
-    if (snapshot !== undefined) reorderMutation.mutate({ expectedRevision: snapshot.revision, orderedTaskIds });
+    if (snapshot === undefined) return;
+    mutationLockRef.current = true;
+    reorderMutation.mutate({ expectedRevision: snapshot.revision, orderedTaskIds });
   }
 
   function setState(taskId: string, state: QueueState): void {
+    if (mutationLockRef.current) return;
+    mutationLockRef.current = true;
     stateMutation.mutate({ state, taskId });
   }
 
