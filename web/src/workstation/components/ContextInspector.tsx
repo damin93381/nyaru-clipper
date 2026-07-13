@@ -59,16 +59,11 @@ export function ContextInspector(): ReactNode {
         {taskId ? <ListChecks aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" /> : <CircleDotDashed aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />}
         <p lang="zh-CN">
           {taskId ? <><span className="ny-workstation__inspector-task-reference">任务 {taskId}</span>的详细进度和恢复操作将<span className="ny-workstation__inspector-copy-phrase">在<span className="ny-workstation__inspector-copy-phrase">此处显示</span></span>。</> : <>
-            从任务库选择一项，即可在
-            <span className="ny-workstation__inspector-copy-phrase">
-              不离开<span className="ny-workstation__inspector-copy-phrase">当前工作区</span>
-              <span className="ny-workstation__inspector-copy-phrase">的情况下</span>
-            </span>
-            查看状态。
+            从任务库选择一项，<span className="ny-workstation__inspector-copy-phrase">即可在不离开<span className="ny-workstation__inspector-copy-phrase">当前工作区</span><span className="ny-workstation__inspector-copy-phrase">的情况下</span></span>查看状态。
           </>}
         </p>
       </div>
-      {summaryQuery.data?.active && activeTaskQuery.data?.items[0] ? <section className="ny-workstation__inspector-state" aria-labelledby="active-gpu-job-title"><p className="ny-workstation__eyebrow">执行中</p><h3 className="ny-workstation__inspector-heading" id="active-gpu-job-title">GPU 作业</h3><p className="ny-workstation__inspector-task-reference" title={activeTaskQuery.data.items[0].title}>{activeTaskQuery.data.items[0].title}</p><p>{stageLabel(activeTaskQuery.data.items[0].current_stage)} · {activeTaskQuery.data.items[0].progress_percent}%</p></section> : null}
+      {summaryQuery.data?.active && activeTaskQuery.data?.items[0] ? <section className="ny-workstation__inspector-state" aria-labelledby="active-gpu-job-title"><p className="ny-workstation__eyebrow">执行中</p><h3 className="ny-workstation__inspector-heading" id="active-gpu-job-title">GPU 作业</h3><p className="ny-workstation__inspector-task-reference"><span className="ny-workstation__inspector-task-title" title={activeTaskQuery.data.items[0].title}>{activeTaskQuery.data.items[0].title}</span></p><p>{stageLabel(activeTaskQuery.data.items[0].current_stage)} · {activeTaskQuery.data.items[0].progress_percent}%</p></section> : null}
     </aside>
   );
 }

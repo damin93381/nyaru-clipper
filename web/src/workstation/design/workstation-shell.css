@@ -26,6 +26,7 @@
 }
 
 .ny-workstation__inspector {
+  min-width: 0;
   border-left: 1px solid var(--ny-border);
 }
 
@@ -115,11 +116,15 @@
   white-space: nowrap;
 }
 
+.ny-workstation__inspector-task-reference { display: block; min-width: 0; }
+.ny-workstation__inspector-task-title { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .ny-workstation__sidebar-note {
   align-self: end;
 }
 
 .ny-workstation__inspector-state {
+  min-width: 0;
   padding-top: var(--ny-space-4);
   border-top: 1px solid var(--ny-border);
 }
@@ -258,10 +263,10 @@
 .ny-task-table__selection-control::after { display: block; inline-size: 8px; block-size: 4px; border: solid var(--ny-surface); border-width: 0 0 2px 2px; content: ""; opacity: 0; transform: translate(4px, 5px) rotate(-45deg); }
 .ny-task-table__selection-control:checked { border-color: var(--ny-accent); background: var(--ny-accent); }
 .ny-task-table__selection-control:checked::after { opacity: 1; }
-.ny-task-table__selection-control:focus-visible { outline: 3px solid var(--ny-focus); outline-offset: 4px; }
+.ny-task-table__selection-control:focus-visible { outline: 3px solid var(--ny-focus); outline-offset: var(--ny-space-1); }
 .ny-task-table__sort { display: inline-flex; gap: var(--ny-space-1); align-items: center; justify-content: center; min-inline-size: var(--ny-target-min); min-block-size: var(--ny-target-min); padding: var(--ny-space-2); border: 0; color: inherit; cursor: pointer; background: transparent; font: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: inherit; }
 .ny-task-table__tags { display: inline-flex; gap: var(--ny-space-1); max-inline-size: 12rem; overflow: hidden; vertical-align: middle; }
-.ny-task-table__tag { overflow: hidden; padding: 2px var(--ny-space-1); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink-muted); font-size: var(--ny-font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.ny-task-table__tag { overflow: hidden; padding: var(--ny-space-1); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink-muted); font-size: var(--ny-font-caption); text-overflow: ellipsis; white-space: nowrap; }
 .ny-task-table__tags--empty { color: var(--ny-ink-muted); font-size: var(--ny-font-caption); }
 .ny-task-table__stage { display: inline-block; max-inline-size: 8rem; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .ny-task-table__hint, .ny-task-table__scroll-instructions { margin: var(--ny-space-3) 0; color: var(--ny-ink-muted); font-size: var(--ny-font-caption); }

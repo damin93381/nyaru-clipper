@@ -148,7 +148,8 @@ export function TaskTable(props: TaskTableProps): ReactNode {
       onKeyDown={(event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
-        event.currentTarget.scrollBy({ behavior: "smooth", left: event.key === "ArrowRight" ? event.currentTarget.clientWidth : -event.currentTarget.clientWidth });
+        const behavior = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+        event.currentTarget.scrollBy({ behavior, left: event.key === "ArrowRight" ? event.currentTarget.clientWidth : -event.currentTarget.clientWidth });
       }}
       role="region"
       tabIndex={0}
