@@ -71,3 +71,36 @@ test("reorders only queued work with a real Chrome pointer drag", async ({ page 
   await expect(page.getByText("队列版本 8")).toBeVisible();
   await expect.poll(async () => (await page.locator("section[aria-labelledby='queue-list-title'] table").nth(1).locator("tbody tr").allTextContents()).map((text) => text.match(/task-\w+/)?.[0])).toEqual(["task-second", "task-first", "task-third"]);
 });
+
+test("shows queue inspection, drag affordances, and disabled menu states in production Chrome", async ({ page }) => {
+  await page.route("**/api/v2/queue**", async (route) => route.fulfill({ json: queueSnapshot }));
+
+  await page.goto("/workstation/queue");
+
+  await page.getByRole("row", { name: /task-second/ }).click();
+  await expect(page.getByRole("complementary", { name: "上下文检查器" }).getByRole("heading", { name: "已选队列项" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "task-active 操作" })).toHaveCount(0);
+  await expect(page.getByText("执行中，当前不可调整。")).toBeVisible();
+
+  const firstHandle = page.getByRole("button", { name: "拖动 task-first" });
+  const secondHandle = page.getByRole("button", { name: "拖动 task-second" });
+  const firstBox = await firstHandle.boundingBox();
+  const secondBox = await secondHandle.boundingBox();
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  if (firstBox === null || secondBox === null) throw new TypeError("Queue drag handles must have measurable boxes");
+
+  await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2 + 8, { steps: 2 });
+  await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2, { steps: 8 });
+  await expect(page.getByRole("row", { name: /task-first/ })).toHaveAttribute("data-queue-drag-source", "true");
+  await expect(page.getByRole("row", { name: /task-second/ })).toHaveAttribute("data-queue-insertion", "after");
+  await page.screenshot({ path: "../.superpowers/sdd/task-11-queue-drag-state.png", fullPage: true });
+  await page.mouse.up();
+
+  await page.getByRole("button", { name: "task-first 操作" }).press("ArrowDown");
+  const moveUp = page.getByRole("menuitem", { name: "上移" });
+  await expect(moveUp).toHaveAttribute("data-disabled", "");
+  await expect(moveUp).toHaveCSS("cursor", "not-allowed");
+});

@@ -167,12 +167,22 @@ describe("QueuePage", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "下移" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: "拖动 task-second" })).toBeDisabled());
+    expect(screen.getByText("正在保存队列更改。")).toHaveAttribute("role", "status");
     expect(screen.getByRole("button", { name: "task-third 操作" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "拖动 task-active" })).toBeDisabled();
 
     latestSnapshot = { ...queueSnapshot, revision: 8, queued: [queueSnapshot.queued[1], queueSnapshot.queued[0], queueSnapshot.queued[2]] };
     response.resolve(jsonResponse(latestSnapshot));
     await waitFor(() => expect(screen.getByRole("button", { name: "拖动 task-second" })).toBeEnabled());
+  });
+
+  it("explains why the running task has no actions instead of exposing an inert overflow menu", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse(queueSnapshot));
+
+    await renderQueue();
+
+    expect(await screen.findByText("执行中，当前不可调整。")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "task-active 操作" })).not.toBeInTheDocument();
   });
 
   it("reorders queued work through keyboard-only menu controls", async () => {
@@ -214,6 +224,7 @@ describe("QueuePage", () => {
     fireEvent.pointerMove(document, { clientX: 20, clientY: 68, isPrimary: true, pointerId: 1 });
     await waitFor(() => expect(firstHandle).toHaveAttribute("aria-pressed", "true"));
     fireEvent.pointerMove(document, { clientX: 20, clientY: 68, isPrimary: true, pointerId: 1 });
+    expect(screen.getByRole("row", { name: /task-first/ })).toHaveAttribute("data-queue-drag-source", "true");
     fireEvent.pointerUp(document, { clientX: 20, clientY: 68, isPrimary: true, pointerId: 1 });
 
     await waitFor(() => expect(requests).toContainEqual(expect.objectContaining({ body: { expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] }, method: "PUT" })));
@@ -236,6 +247,7 @@ describe("QueuePage", () => {
     fireEvent.keyDown(firstHandle, { code: "Space", key: " " });
     await waitFor(() => expect(firstHandle).toHaveAttribute("aria-pressed", "true"));
     fireEvent.keyDown(document, { code: "ArrowDown", key: "ArrowDown" });
+    await waitFor(() => expect(screen.getByRole("row", { name: /task-second/ })).toHaveAttribute("data-queue-insertion", "after"));
     fireEvent.keyDown(document, { code: "Space", key: " " });
 
     await waitFor(() => expect(requests).toContainEqual(expect.objectContaining({ body: { expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] }, method: "PUT" })));

@@ -1,9 +1,11 @@
 import { CircleDotDashed, ListChecks } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { getTaskLibraryPage, getTaskLibrarySummary } from "../features/task-library/api";
+import { getQueue } from "../features/queue/api";
+import { QueueInspector } from "../features/queue/QueueInspector";
 import { workstationKeys } from "../api/queryKeys";
 import { TaskInspector } from "../features/task-library/TaskInspector";
 
@@ -36,16 +38,30 @@ function stageLabel(stage: string | null): string {
 }
 
 export function ContextInspector(): ReactNode {
+  const location = useLocation();
   const { taskId } = useParams();
   const [searchParams] = useSearchParams();
   const selectedTaskId = searchParams.get("selected");
-  const showWorkspaceSummary = selectedTaskId === null && taskId === undefined;
+  const isQueueRoute = location.pathname === "/workstation/queue";
+  const showWorkspaceSummary = !isQueueRoute && selectedTaskId === null && taskId === undefined;
   const summaryQuery = useQuery({ queryKey: workstationKeys.summary, queryFn: getTaskLibrarySummary, enabled: showWorkspaceSummary });
   const activeTaskQuery = useQuery({
     queryKey: workstationKeys.list({ direction: "desc", page: 1, page_size: 25, sort: "updated_at", statuses: ["running"] }),
     queryFn: () => getTaskLibraryPage(runningTaskFilters),
     enabled: showWorkspaceSummary,
   });
+
+  const queueQuery = useQuery({ queryKey: workstationKeys.queue, queryFn: ({ signal }) => getQueue(signal), enabled: isQueueRoute });
+
+  if (isQueueRoute) {
+    return (
+      <aside className="ny-workstation__inspector" aria-label="上下文检查器">
+        {queueQuery.isPending || queueQuery.data === undefined
+          ? <p className="ny-workstation-page__copy">正在读取队列上下文。</p>
+          : <QueueInspector selectedTaskId={selectedTaskId} snapshot={queueQuery.data} />}
+      </aside>
+    );
+  }
 
   if (selectedTaskId) {
     return <aside className="ny-workstation__inspector" aria-label="上下文检查器"><TaskInspector taskId={selectedTaskId} /></aside>;

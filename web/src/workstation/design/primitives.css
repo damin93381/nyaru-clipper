@@ -261,6 +261,8 @@
 .ny-menu--content { z-index: 30; }
 .ny-menu-item { display: flex; align-items: center; width: 100%; padding: var(--ny-space-2) var(--ny-space-3); color: var(--ny-ink); cursor: pointer; background: transparent; }
 .ny-menu-item:hover, .ny-menu-item:focus { background: var(--ny-surface-muted); outline: none; }
+.ny-menu-item[data-disabled] { color: var(--ny-ink-muted); cursor: not-allowed; background: var(--ny-surface-muted); }
+.ny-menu-item[data-disabled]:hover, .ny-menu-item[data-disabled]:focus, .ny-menu-item[data-disabled]:focus-visible { color: var(--ny-ink-muted); cursor: not-allowed; background: var(--ny-surface-muted); outline: none; }
 .ny-tooltip { line-height: var(--ny-line-body); }
 .ny-tooltip__arrow { fill: var(--ny-surface); }
 

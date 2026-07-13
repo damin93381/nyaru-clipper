@@ -26,7 +26,7 @@ export function QueueInspector({ selectedTaskId, snapshot }: QueueInspectorProps
   const item = selectedItem(snapshot, selectedTaskId);
 
   return (
-    <section className="ny-showcase__section" aria-labelledby="queue-inspector-title">
+    <section className="ny-queue-inspector" aria-labelledby="queue-inspector-title">
       <p className="ny-workstation__eyebrow">队列检查器</p>
       <h2 className="ny-showcase__section-heading" id="queue-inspector-title">{item ? "已选队列项" : "选择队列项"}</h2>
       {item ? <dl className="ny-task-library__summary"><div><dt>任务</dt><dd className="ny-table__technical">{item.task_id}</dd></div><div><dt>状态</dt><dd>{stateLabel(item.state)}</dd></div><div><dt>位置</dt><dd>{item.state === "queued" ? item.position : "—"}</dd></div><div><dt>优先级</dt><dd>{item.priority}</dd></div></dl> : <p className="ny-workstation-page__copy">选择一项以查看当前队列位置与状态。</p>}

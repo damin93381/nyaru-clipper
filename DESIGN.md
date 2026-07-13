@@ -98,6 +98,12 @@ The first delivery supports desktop widths from 1280 px. Product screens are not
 - **States:** default, hover-capable, focus-visible, selected, running, success, warning, failed.
 - **Accessibility:** row action has an accessible name and selected state is programmatic.
 
+### Queue action and drag states
+
+- **Structure:** queued rows use a real dnd-kit drag handle, an in-place active source treatment, a target insertion rule, and Radix menu actions during reorder; running rows render a concise noninteractive reason when no action is legal.
+- **States:** updating is visibly announced; drag source becomes muted; before/after insertion uses the vermilion rule; disabled Radix items use muted ink, a readable tonal plane, and a not-allowed cursor without hover/focus treatment.
+- **Accessibility:** pointer and keyboard drags expose the same source/insertion state; the updating message uses a text status role; inactive menu triggers are not rendered.
+
 ### Horizontally scrollable operations table
 
 - **Structure:** a focusable, labelled table region retains the dense 1200 px table; it places a visible scroll instruction before the row interaction hint and attaches the same instruction as the region description.

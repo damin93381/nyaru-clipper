@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RotateCw } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { QueueConflictError, getQueue, reorderQueue, reorderSnapshot, setQueueItemState } from "./api";
-import { QueueInspector } from "./QueueInspector";
 import { QueueList } from "./QueueList";
 import { workstationKeys } from "../../api/queryKeys";
 import type { QueueSnapshot, QueueState } from "./api";
@@ -20,8 +20,9 @@ interface ReorderContext {
 
 export function QueuePage(): ReactNode {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [announcement, setAnnouncement] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => searchParams.get("selected"));
   const mutationLockRef = useRef(false);
   const queueQuery = useQuery({ queryKey: workstationKeys.queue, queryFn: ({ signal }) => getQueue(signal) });
 
@@ -89,6 +90,15 @@ export function QueuePage(): ReactNode {
     stateMutation.mutate({ state, taskId });
   }
 
+  function selectTask(taskId: string): void {
+    setSelectedTaskId(taskId);
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("selected", taskId);
+    setSearchParams(nextSearchParams, { replace: true });
+  }
+
+  useEffect(() => setSelectedTaskId(searchParams.get("selected")), [searchParams]);
+
   if (queueQuery.isPending) return <section className="ny-workstation-page"><p className="ny-workstation__eyebrow">处理队列</p><h1 className="ny-workstation-page__title">处理队列</h1><p className="ny-feedback ny-feedback--loading">正在读取处理队列。</p></section>;
   if (queueQuery.isError || queueQuery.data === undefined) return <section className="ny-workstation-page"><p className="ny-workstation__eyebrow">处理队列</p><h1 className="ny-workstation-page__title">处理队列无法读取</h1><button className="ny-button" onClick={() => void queueQuery.refetch()} type="button"><RotateCw aria-hidden="true" size="var(--ny-icon-default)" />重新读取处理队列</button></section>;
 
@@ -97,8 +107,7 @@ export function QueuePage(): ReactNode {
     <section className="ny-task-library" aria-labelledby="queue-page-title">
       <header className="ny-task-library__header"><div><p className="ny-workstation__eyebrow">处理队列</p><h1 className="ny-workstation-page__title" id="queue-page-title">处理队列</h1></div><span className="ny-task-library__summary">队列版本 {snapshot.revision}</span></header>
       {announcement ? <p className="ny-task-library__announcement" role="status">{announcement}</p> : null}
-      <QueueList isMutating={reorderMutation.isPending || stateMutation.isPending} onReorder={reorder} onSelect={setSelectedTaskId} onSetState={setState} selectedTaskId={selectedTaskId} snapshot={snapshot} />
-      <QueueInspector selectedTaskId={selectedTaskId} snapshot={snapshot} />
+      <QueueList isMutating={reorderMutation.isPending || stateMutation.isPending} onReorder={reorder} onSelect={selectTask} onSetState={setState} selectedTaskId={selectedTaskId} snapshot={snapshot} />
     </section>
   );
 }

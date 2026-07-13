@@ -5,6 +5,12 @@ import { ContextInspector } from "../ContextInspector";
 import { renderWorkstation } from "../../testing/renderWorkstation";
 
 const activeTaskTitle = "高光候选片段";
+const queueSnapshot = {
+  active: { position: 0, priority: 0, state: "running", task_id: "task-active" },
+  paused: [],
+  queued: [{ position: 1, priority: 0, state: "queued", task_id: "task-second" }],
+  revision: 7,
+} as const;
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
@@ -58,5 +64,15 @@ describe("ContextInspector", () => {
     const title = await screen.findByTitle(activeTaskTitle);
     expect(title).toHaveClass("ny-workstation__inspector-task-title");
     expect(title).toHaveTextContent(activeTaskTitle);
+  });
+
+  it("shows a selected queue item in the persistent context rail", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse(queueSnapshot));
+
+    renderWorkstation(<ContextInspector />, { route: "/workstation/queue?selected=task-second" });
+
+    expect(await screen.findByRole("heading", { name: "已选队列项" })).toBeVisible();
+    expect(screen.getByText("task-second")).toBeVisible();
+    expect(screen.getByLabelText("上下文检查器")).toContainElement(screen.getByText("队列检查器"));
   });
 });
