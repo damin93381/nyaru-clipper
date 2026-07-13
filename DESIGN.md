@@ -98,6 +98,12 @@ The first delivery supports desktop widths from 1280 px. Product screens are not
 - **States:** default, hover-capable, focus-visible, selected, running, success, warning, failed.
 - **Accessibility:** row action has an accessible name and selected state is programmatic.
 
+### Horizontally scrollable operations table
+
+- **Structure:** a focusable, labelled table region retains the dense 1200 px table; it places a visible scroll instruction before the row interaction hint and attaches the same instruction as the region description.
+- **States:** resting, keyboard focus-visible, horizontal overflow, selected, failed.
+- **Accessibility:** the region is reachable with Tab and uses Left/Right Arrow to move by the current viewport; selection and task-title columns remain sticky so horizontal scanning retains task context. Keep operational columns such as progress, updated time, and storage in the data table rather than hiding them.
+
 ### Drawer, dialog, menu, tooltip, and toast
 
 - **Structure:** Radix primitive roots with real portal and focus handling; dialogs and drawers have a visible title and close control.
@@ -136,7 +142,7 @@ The strategy is **mixed, ruled paper**: a small-radius ivory plane, a 1 px warm-
 - Modal, drawer, menu, tooltip, and toast semantics use Radix primitives with keyboard and assistive-technology behavior retained.
 - Status, selection, and failure use text plus iconography as well as color.
 - Dense operational views preserve 14 px minimum body text, tabular numerals, logical reading order, and plain-language recovery messages.
-- Reduced-motion preference is respected. CJK strings must use natural wrapping, never clipped glyphs or isolated semantic fragments.
+- Reduced-motion preference is respected. CJK strings must use natural wrapping, never clipped glyphs or isolated semantic fragments. Overlay descriptions use strict CJK line breaking and protect semantic phrase spans from wrapping internally.
 
 ### Accepted debt
 

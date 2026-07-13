@@ -184,6 +184,26 @@ describe("TaskLibraryPage", () => {
     await waitFor(() => expect(titleHeader).toHaveAttribute("aria-sort", "ascending"));
   });
 
+  it("makes the dense task table's horizontal overflow discoverable and keyboard-operable", async () => {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (url.pathname.endsWith("/summary")) return jsonResponse({ active: 0, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 0 });
+      return jsonResponse({ items: [listItem], page: 1, page_count: 1, page_size: 50, total: 1 });
+    });
+
+    await renderTaskLibrary();
+    const scrollRegion = await screen.findByRole("region", { name: "任务表格，可水平滚动" });
+    const scrollBy = vi.fn();
+    Object.assign(scrollRegion, { scrollBy });
+
+    expect(scrollRegion).toHaveAttribute("tabindex", "0");
+    expect(scrollRegion).toHaveAccessibleDescription("进度、更新时间和存储位于右侧；可横向滚动查看。聚焦表格后，可使用左右方向键滚动。");
+    expect(screen.getByText(/进度、更新时间和存储位于右侧；可横向滚动查看。/)).toBeVisible();
+
+    fireEvent.keyDown(scrollRegion, { key: "ArrowRight" });
+    expect(scrollBy).toHaveBeenCalledOnce();
+  });
+
   it("keeps failed bulk rows selected and announces the per-row result", async () => {
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
@@ -222,12 +242,14 @@ describe("TaskLibraryPage", () => {
     const row = await screen.findByRole("row", { name: new RegExp(taskTitle.slice(0, 24)) });
     fireEvent.click(row);
     fireEvent.click(screen.getByRole("button", { name: "标记选中任务" }));
+    expect(await screen.findByText("保留未成功任务的选择状态")).toHaveClass("ny-overlay__description-phrase");
     fireEvent.change(await screen.findByLabelText("批量标签"), { target: { value: "精选，待复核" } });
     fireEvent.click(screen.getByRole("button", { name: "确认标记" }));
     await waitFor(() => expect(bulkBodies).toContainEqual({ operation: "set_tags", task_ids: ["task-42"], tags: ["精选", "待复核"] }));
     expect(await screen.findByRole("status")).toHaveTextContent("task-42：仍在处理中");
 
     fireEvent.click(screen.getByRole("button", { name: "重新排队选中任务" }));
+    expect(await screen.findByText("保持选择状态")).toHaveClass("ny-overlay__description-phrase");
     fireEvent.click(await screen.findByRole("button", { name: "确认重新排队" }));
     await waitFor(() => expect(bulkBodies).toContainEqual({ operation: "requeue", task_ids: ["task-42"] }));
   });

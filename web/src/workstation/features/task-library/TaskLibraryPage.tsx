@@ -21,6 +21,12 @@ const statusOptions = [
 
 type BulkOperation = "archive" | "delete" | "set_tags" | "requeue";
 
+type BulkOperationCopy = {
+  readonly confirmLabel: string;
+  readonly description: ReactNode;
+  readonly title: string;
+};
+
 function sourceKindFromInput(value: string): "all" | "bilibili" | "local" {
   if (value === "bilibili" || value === "local") return value;
   return "all";
@@ -45,16 +51,20 @@ function parseBulkTags(value: string): string[] {
   return value.split("，").map((tag) => tag.trim()).filter(Boolean);
 }
 
-function bulkOperationCopy(operation: BulkOperation): { readonly confirmLabel: string; readonly description: string; readonly title: string } {
+function CjkPhrase({ children }: { readonly children: ReactNode }): ReactNode {
+  return <span className="ny-overlay__description-phrase">{children}</span>;
+}
+
+function bulkOperationCopy(operation: BulkOperation): BulkOperationCopy {
   switch (operation) {
     case "archive":
-      return { confirmLabel: "确认归档", description: "此操作会逐项执行，并保留未成功任务的选择状态。", title: "归档选中的任务？" };
+      return { confirmLabel: "确认归档", description: <><CjkPhrase>此操作会逐项执行</CjkPhrase>，并<CjkPhrase>保留未成功任务的选择状态</CjkPhrase>。</>, title: "归档选中的任务？" };
     case "delete":
-      return { confirmLabel: "确认删除", description: "此操作会逐项执行，并保留未成功任务的选择状态。", title: "删除选中的任务？" };
+      return { confirmLabel: "确认删除", description: <><CjkPhrase>此操作会逐项执行</CjkPhrase>，并<CjkPhrase>保留未成功任务的选择状态</CjkPhrase>。</>, title: "删除选中的任务？" };
     case "set_tags":
-      return { confirmLabel: "确认标记", description: "新标签会替换选中任务的现有标签，并保留未成功任务的选择状态。", title: "标记选中的任务？" };
+      return { confirmLabel: "确认标记", description: <><CjkPhrase>新标签</CjkPhrase>会替换<CjkPhrase>选中任务</CjkPhrase>的现有标签，并<CjkPhrase>保留未成功任务的选择状态</CjkPhrase>。</>, title: "标记选中的任务？" };
     case "requeue":
-      return { confirmLabel: "确认重新排队", description: "终止的任务会从中断阶段重新进入队列；未成功任务会保持选择状态。", title: "重新排队选中的任务？" };
+      return { confirmLabel: "确认重新排队", description: <><CjkPhrase>终止的任务</CjkPhrase>会从<CjkPhrase>中断阶段</CjkPhrase><CjkPhrase>重新进入队列</CjkPhrase>；<CjkPhrase>未成功任务</CjkPhrase>会<CjkPhrase>保持选择状态</CjkPhrase>。</>, title: "重新排队选中的任务？" };
   }
 }
 

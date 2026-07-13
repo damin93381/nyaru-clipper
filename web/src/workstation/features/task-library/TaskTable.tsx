@@ -1,5 +1,5 @@
 import { flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ChevronsUpDown, ExternalLink } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, ChevronsUpDown, ExternalLink } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { ReactNode } from "react";
 
@@ -42,6 +42,12 @@ function formatStorage(bytes: number): string {
 
 function formatUpdatedAt(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function stickyColumnClass(columnId: string): string | undefined {
+  if (columnId === "selection") return "ny-task-table__sticky ny-task-table__sticky--selection";
+  if (columnId === "title") return "ny-task-table__sticky ny-task-table__sticky--title";
+  return undefined;
 }
 
 export function TaskTable(props: TaskTableProps): ReactNode {
@@ -135,7 +141,18 @@ export function TaskTable(props: TaskTableProps): ReactNode {
   }
 
   return (
-    <div className="ny-task-table__scroll">
+    <div
+      aria-describedby="task-table-scroll-instructions"
+      aria-label="任务表格，可水平滚动"
+      className="ny-task-table__scroll"
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        event.currentTarget.scrollBy({ behavior: "smooth", left: event.key === "ArrowRight" ? event.currentTarget.clientWidth : -event.currentTarget.clientWidth });
+      }}
+      role="region"
+      tabIndex={0}
+    >
       <table className="ny-table ny-task-table">
         <thead>
           {table.getHeaderGroups().map((headerGroup) => (
@@ -145,7 +162,7 @@ export function TaskTable(props: TaskTableProps): ReactNode {
                 const ariaSort = isSortableColumn(sort) && props.filters.sort === sort
                   ? (props.filters.direction === "asc" ? "ascending" : "descending")
                   : undefined;
-                return <th aria-sort={ariaSort} key={header.id} scope="col">
+                return <th aria-sort={ariaSort} className={stickyColumnClass(sort)} key={header.id} scope="col">
                   {isSortableColumn(sort) ? (
                     <button className="ny-task-table__sort" onClick={() => props.onSort(sort)} type="button">
                       {flexRender(header.column.columnDef.header, header.getContext())}
@@ -173,12 +190,13 @@ export function TaskTable(props: TaskTableProps): ReactNode {
                 }}
                 tabIndex={0}
               >
-                {row.getVisibleCells().map((cell) => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}
+                {row.getVisibleCells().map((cell) => <td className={stickyColumnClass(cell.column.id)} key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}
               </tr>
             );
           })}
         </tbody>
       </table>
+      <p className="ny-task-table__scroll-instructions" id="task-table-scroll-instructions"><ArrowLeftRight aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />进度、更新时间和存储位于右侧；可横向滚动查看。聚焦表格后，可使用左右方向键滚动。</p>
       <p className="ny-task-table__hint"><ExternalLink aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />按 Enter 或双击打开任务概览。</p>
     </div>
   );

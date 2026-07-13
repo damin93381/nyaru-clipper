@@ -249,7 +249,8 @@
 }
 
 .ny-overlay__title { margin: 0; font-family: var(--ny-font-serif); font-size: var(--ny-font-section); }
-.ny-overlay__description { margin: 0; color: var(--ny-ink-muted); line-height: var(--ny-line-body); }
+.ny-overlay__description { margin: 0; color: var(--ny-ink-muted); line-break: strict; line-height: var(--ny-line-body); overflow-wrap: normal; text-wrap: pretty; }
+.ny-overlay__description-phrase { white-space: nowrap; }
 .ny-overlay__actions { display: flex; gap: var(--ny-space-2); flex-wrap: wrap; }
 
 .ny-drawer { position: fixed; inset: 0 0 0 auto; align-content: start; min-height: 100dvh; border-radius: 0; }
