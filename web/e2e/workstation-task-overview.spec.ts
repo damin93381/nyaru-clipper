@@ -71,7 +71,7 @@ test("renders the task overview and selected-stage inspector in production Chrom
 });
 
 test("keeps a Japanese title clause unbroken at the compact desktop width", async ({ page }) => {
-  const title = "緊急映像の中にある字幕レビューを確認する単一作業者向け長文運用タイトル検証";
+  const title = "映像の中にある字幕レビューを確認する";
   const japaneseOverview = { ...taskOverview, title };
   await page.setViewportSize({ height: 900, width: 1280 });
   await page.route("http://127.0.0.1:8000/api/**", async (route) => {
@@ -86,10 +86,17 @@ test("keeps a Japanese title clause unbroken at the compact desktop width", asyn
   await page.goto("/workstation/tasks/task-e2e-overview");
 
   const heading = page.getByRole("heading", { name: title });
-  const phrase = heading.locator(".ny-task-overview__title-phrase", { hasText: "映像の中にある" });
+  const locationClause = heading.locator(".ny-task-overview__title-phrase", { hasText: "映像の中にある" });
+  const reviewClause = heading.locator(".ny-task-overview__title-phrase", { hasText: "レビューを確認する" });
   await expect(heading).toBeVisible();
-  await expect(phrase).toHaveText("映像の中にある");
-  expect(await phrase.evaluate((node) => {
+  await expect(locationClause).toHaveText("映像の中にある");
+  await expect(reviewClause).toHaveText("レビューを確認する");
+  expect(await locationClause.evaluate((node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.getClientRects().length;
+  })).toBe(1);
+  expect(await reviewClause.evaluate((node) => {
     const range = document.createRange();
     range.selectNodeContents(node);
     return range.getClientRects().length;

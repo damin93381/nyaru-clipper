@@ -107,14 +107,35 @@ describe("TaskOverviewPage", () => {
   });
 
   it("keeps Japanese connective title clauses together without changing the accessible title", async () => {
-    const title = "映像の中にある字幕レビュー";
+    const title = "映像の中にある字幕レビューを確認する場面が残る記録は続く音声も確認する";
     vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
 
     renderOverview();
 
     const heading = await screen.findByRole("heading", { name: title });
+    const phrases = Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent);
     expect(heading).toHaveTextContent(title);
-    expect(Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent)).toContain("映像の中にある");
+    expect(phrases).toContain("映像の中にある");
+    expect(phrases).toContain("レビューを確認する");
+    expect(phrases).toContain("場面が残る");
+    expect(phrases).toContain("記録は続く");
+    expect(phrases).toContain("音声も確認する");
+    expect(phrases).not.toContain("レビューを");
+  });
+
+  it("keeps Korean title tokens protected without making long tokens unbreakable", async () => {
+    const title = "영상의 자막 검토와 초장문운영작업공간제목토큰검증";
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
+
+    renderOverview();
+
+    const heading = await screen.findByRole("heading", { name: title });
+    const phrases = Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent ?? "");
+    expect(heading).toHaveTextContent(title);
+    expect(phrases).toContain("영상의");
+    expect(phrases).toContain("검토와");
+    expect(phrases.every((phrase) => phrase.length <= 12)).toBe(true);
+    expect(phrases).not.toContain("초장문운영작업공간제목토큰검증");
   });
 
   it("keeps non-CJK titles readable when the server runtime lacks Intl.Segmenter", async () => {

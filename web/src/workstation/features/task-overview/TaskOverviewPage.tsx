@@ -24,7 +24,8 @@ interface TitleSegmenterConstructor {
 
 const titleCjkCharacter = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 const titlePostposition = /^(?:的|地|得|中|中的|里|上|下|内|外|前|后|间|时|の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも|의|은|는|이|가|을|를|에|에서|로|으로|와|과|도|만|까지|부터)$/u;
-const japanesePhraseBridge = /(?:の|に|へ|で|と|から|まで|より|ので|のに)$/u;
+const japanesePhraseBridge = /(?:の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも)$/u;
+const japanesePredicateContinuation = /^(?:する|した|して|される|された|されて|ある|いる|なる|なった|できる|できた|ない|たい)$/u;
 const titlePhraseLengthLimit = 12;
 
 function isTitleSegmenterConstructor(value: unknown): value is TitleSegmenterConstructor {
@@ -41,7 +42,8 @@ function segmentedTaskTitle(title: string): ReactNode {
     const previousPhrase = currentPhrases[currentPhrases.length - 1];
     const combinedLength = previousPhrase === undefined ? 0 : previousPhrase.length + segment.length;
     const extendsJapanesePhrase = previousPhrase !== undefined && japanesePhraseBridge.test(previousPhrase) && titleCjkCharacter.test(segment);
-    if (previousPhrase !== undefined && combinedLength <= titlePhraseLengthLimit && titleCjkCharacter.test(previousPhrase) && (titlePostposition.test(segment) || extendsJapanesePhrase)) {
+    const extendsJapanesePredicate = previousPhrase !== undefined && japanesePredicateContinuation.test(segment);
+    if (previousPhrase !== undefined && combinedLength <= titlePhraseLengthLimit && titleCjkCharacter.test(previousPhrase) && (titlePostposition.test(segment) || extendsJapanesePhrase || extendsJapanesePredicate)) {
       currentPhrases[currentPhrases.length - 1] = `${previousPhrase}${segment}`;
       return currentPhrases;
     }
