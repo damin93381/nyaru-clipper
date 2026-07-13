@@ -9,6 +9,7 @@ from sqlmodel import Session, SQLModel, select
 
 from app.db import get_engine
 from app.models import Task, TaskExecutionControl, TaskJob, TaskStage, utc_now
+from app.services.workstation_events import publish_stage_updated, publish_task_updated
 
 PIPELINE_EXECUTION_CONTEXT_KEY = "pipeline_execution_context"
 
@@ -223,6 +224,7 @@ def finalize_cancelled(session: Session, *, task_id: str, execution_token: str) 
         task.status = "cancelled"
         task.updated_at = now
         session.add(task)
+        publish_task_updated(session, task)
 
     if job is not None:
         job.status = "cancelled"
@@ -236,6 +238,7 @@ def finalize_cancelled(session: Session, *, task_id: str, execution_token: str) 
         stage.finished_at = now
         stage.updated_at = now
         session.add(stage)
+        publish_stage_updated(session, stage)
 
     control.execution_token = None
     control.active_process_group_id = None

@@ -218,9 +218,7 @@ def _create_workstation_task(session: Session, payload: CreateWorkstationTaskReq
     session.add(TaskJob(task_id=task_id, stage_name=CANONICAL_STAGES[0], status="pending", gpu_bound=True))
     run = create_pipeline_run(session, task_id, "create")
     session.add_all([StageRun(run_id=run.id, name=stage_name, status="pending") for stage_name in CANONICAL_STAGES])
-    queue_entry = enqueue_task(session, task_id)
-    queue_entry.priority = payload.priority
-    session.add(queue_entry)
+    enqueue_task(session, task_id, priority=payload.priority)
     publish_event(session, "task.created", task_id, {"task_id": task_id, "status": task.status})
     session.flush()
     return task

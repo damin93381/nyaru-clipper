@@ -319,6 +319,7 @@ def run_task_pipeline(
             if _finalize_cancelled_if_requested(session, task_id=task_id):
                 _sync_current_stage_run(session, pipeline_run.id, task_id)
                 finish_pipeline_run(session, pipeline_run, "cancelled")
+                session.commit()
                 return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
 
             for index in range(start_index, len(CANONICAL_STAGE_ORDER)):
@@ -330,6 +331,7 @@ def run_task_pipeline(
                 if _finalize_cancelled_if_requested(session, task_id=task_id):
                     _sync_current_stage_run(session, pipeline_run.id, task_id)
                     finish_pipeline_run(session, pipeline_run, "cancelled")
+                    session.commit()
                     return _current_run_result(session, task_id=task_id, completed_stages=completed_stages)
 
                 if index == start_index and claimed_stage_running:

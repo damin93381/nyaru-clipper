@@ -103,7 +103,7 @@ def set_queue_state(session: Session, task_id: str, state: QueueMutationState) -
     return _increment_and_snapshot(session, now=now)
 
 
-def enqueue_task(session: Session, task_id: str) -> QueueEntry:
+def enqueue_task(session: Session, task_id: str, *, priority: int = 0) -> QueueEntry:
     """Ensure a task has a queued projection entry before the worker can see it."""
     _begin_immediate(session)
     entry = session.get(QueueEntry, task_id)
@@ -111,7 +111,14 @@ def enqueue_task(session: Session, task_id: str) -> QueueEntry:
         return entry
     now = utc_now()
     position = len(session.exec(select(QueueEntry).where(QueueEntry.state.in_(["queued", "paused"]))).all()) + 1
-    entry = QueueEntry(task_id=task_id, position=position, state="queued", created_at=now, updated_at=now)
+    entry = QueueEntry(
+        task_id=task_id,
+        position=position,
+        priority=priority,
+        state="queued",
+        created_at=now,
+        updated_at=now,
+    )
     session.add(entry)
     queue_state = _queue_state(session)
     queue_state.revision += 1

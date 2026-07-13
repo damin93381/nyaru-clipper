@@ -169,7 +169,7 @@ def test_v2_task_creation_stages_a_public_created_event(database) -> None:
     payload = {
         "source": {"kind": "bilibili", "url": "https://www.bilibili.com/video/BV1eventv2001"},
         "profile_id": "standard",
-        "priority": 0,
+        "priority": 7,
     }
 
     # When: the v2 creation route commits its task transaction.
@@ -180,8 +180,72 @@ def test_v2_task_creation_stages_a_public_created_event(database) -> None:
     # Then: SSE consumers receive only the new task's public lifecycle projection.
     with Session(database) as session:
         event = session.exec(select(WorkstationEvent).where(WorkstationEvent.event_type == "task.created")).one()
+        queue_events = session.exec(
+            select(WorkstationEvent).where(WorkstationEvent.event_type == "queue.updated")
+        ).all()
     assert response.status_code == 201
     assert json.loads(event.payload_json) == {"task_id": task_id, "status": "pending"}
+    assert len(queue_events) == 1
+    assert json.loads(queue_events[0].payload_json) == {
+        "revision": 2,
+        "active": None,
+        "queued": [{"task_id": task_id, "position": 1, "priority": 7, "state": "queued"}],
+        "paused": [],
+    }
+
+
+def test_runner_cancellation_commits_public_task_and_stage_events(database) -> None:
+    from app.models import Task, TaskJob, TaskStage, WorkstationEvent
+    from app.repositories.tasks import create_task
+    from app.services.task_control import activate_execution, request_cancel
+    import app.services.task_runner as task_runner
+
+    # Given: a worker-claimed stage with a requested cancellation before the runner starts it.
+    with Session(database) as session:
+        created, was_created = create_task(session, "https://www.bilibili.com/video/BV1eventcancel001")
+        task_id = created["task_id"]
+        task = session.get(Task, task_id)
+        job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+        stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "ingest")
+        ).one()
+        assert task is not None
+        task.status = "running"
+        job.status = "running"
+        stage.status = "running"
+        session.add(task)
+        session.add(job)
+        session.add(stage)
+        session.commit()
+        activate_execution(session, task_id=task_id, execution_token="token-event-cancel")
+        request_cancel(session, task_id=task_id)
+
+    # When: the runner finalizes that cancellation before the next stage checkpoint.
+    with Session(database) as session:
+        result = task_runner.run_task_pipeline(
+            session,
+            task_id,
+            claimed_stage_running=True,
+            execution_token="token-event-cancel",
+        )
+
+    # Then: the committed cancellation projection includes both affected public entities.
+    with Session(database) as session:
+        events = session.exec(select(WorkstationEvent).order_by(WorkstationEvent.id)).all()
+    payloads_by_type = [(event.event_type, json.loads(event.payload_json)) for event in events]
+    assert was_created is True
+    assert result.final_status == "cancelled"
+    assert ("task.updated", {"task_id": task_id, "status": "cancelled"}) in payloads_by_type
+    assert (
+        "stage.updated",
+        {
+            "task_id": task_id,
+            "stage_name": "ingest",
+            "status": "cancelled",
+            "failure_code": None,
+            "attempts": 0,
+        },
+    ) in payloads_by_type
 
 
 def test_task_runner_stages_public_task_and_stage_events_at_stage_checkpoints(database, monkeypatch) -> None:
