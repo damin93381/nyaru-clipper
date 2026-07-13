@@ -104,3 +104,20 @@ test("shows queue inspection, drag affordances, and disabled menu states in prod
   await expect(moveUp).toHaveAttribute("data-disabled", "");
   await expect(moveUp).toHaveCSS("cursor", "not-allowed");
 });
+
+test("selects a queue entry with Enter and updates the persistent inspector URL", async ({ page }) => {
+  await page.route("**/api/v2/queue**", async (route) => route.fulfill({ json: queueSnapshot }));
+
+  await page.goto("/workstation/queue");
+
+  const selectionAction = page.getByRole("button", { name: "选择 task-second" });
+  await selectionAction.focus();
+  const selectionBox = await selectionAction.boundingBox();
+  expect(selectionBox?.height).toBeGreaterThanOrEqual(44);
+  await expect(selectionAction).toBeFocused();
+  await selectionAction.press("Enter");
+
+  await expect(page).toHaveURL(/\/workstation\/queue\?selected=task-second$/);
+  await expect(page.getByRole("complementary", { name: "上下文检查器" }).getByRole("heading", { name: "已选队列项" })).toBeVisible();
+  await expect(selectionAction).toHaveAttribute("aria-pressed", "true");
+});

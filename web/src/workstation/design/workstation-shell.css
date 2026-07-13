@@ -288,6 +288,8 @@
 .ny-queue-inspector { display: grid; gap: var(--ny-space-4); }
 .ny-queue__updating { margin: 0; padding: var(--ny-space-2) var(--ny-space-3); border-left: 3px solid var(--ny-focus); color: var(--ny-ink); background: var(--ny-surface-muted); font-size: var(--ny-font-body); }
 .ny-queue__unavailable { display: inline-flex; align-items: center; min-height: var(--ny-target-min); color: var(--ny-ink-muted); font-size: var(--ny-font-caption); line-height: var(--ny-line-body); }
+.ny-queue__selection-action { display: inline-flex; align-items: center; min-height: var(--ny-target-min); padding: var(--ny-space-2) 0; border: 0; color: var(--ny-ink); cursor: pointer; background: transparent; font-family: var(--ny-font-mono); text-decoration: underline; text-decoration-color: transparent; text-underline-offset: var(--ny-space-1); }
+.ny-queue__selection-action:hover, .ny-queue__selection-action[aria-pressed="true"] { color: var(--ny-accent); text-decoration-color: currentColor; }
 .ny-queue__row--dragging td { color: var(--ny-ink-muted); background: var(--ny-surface-muted); opacity: 0.5; }
 .ny-table tr[data-queue-insertion="before"] td { box-shadow: inset 0 3px 0 var(--ny-accent); }
 .ny-table tr[data-queue-insertion="after"] td { box-shadow: inset 0 -3px 0 var(--ny-accent); }

@@ -77,7 +77,7 @@ function QueueRow({ canMoveDown, canMoveUp, isMutating, item, onMove, onSelect, 
       onSelect(item.task_id);
     }} ref={setNodeRef} style={style}>
       <td><button aria-label={`拖动 ${item.task_id}`} className="ny-button ny-button--quiet" disabled={!sortable || isMutating} type="button" {...attributes} {...listeners}><GripVertical aria-hidden="true" size="var(--ny-icon-default)" /></button></td>
-      <td className="ny-table__technical">{item.task_id}</td>
+      <td className="ny-table__technical"><button aria-label={`选择 ${item.task_id}`} aria-pressed={selected} className="ny-queue__selection-action" onClick={() => onSelect(item.task_id)} type="button">{item.task_id}</button></td>
       <td>{item.state === "running" ? "正在执行" : item.state === "paused" ? "已暂停" : "等待处理"}</td>
       <td>{item.state === "queued" ? item.position : "—"}</td>
       <td>{item.priority}</td>
