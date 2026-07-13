@@ -1560,7 +1560,9 @@ export interface operations {
     };
     workstation_events_endpoint_api_v2_events_get: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: number | null;
+            };
             header?: {
                 "Last-Event-ID"?: number | null;
             };

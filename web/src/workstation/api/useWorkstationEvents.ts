@@ -46,6 +46,7 @@ export function useWorkstationEvents(): WorkstationEventConnection {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
     let consecutiveFailures = 0;
+    let lastReceivedEventId: string | null = null;
     let disposed = false;
 
     const invalidateTaskProjections = (taskId: string | undefined) => {
@@ -80,7 +81,7 @@ export function useWorkstationEvents(): WorkstationEventConnection {
       }
 
       setState(consecutiveFailures >= workstationReconnectDelays.length ? "fallback" : "connecting");
-      eventSource = new EventSource(getWorkstationEventsUrl());
+      eventSource = new EventSource(getWorkstationEventsUrl(lastReceivedEventId));
       eventSource.onopen = () => {
         if (disposed) {
           return;
@@ -115,6 +116,7 @@ export function useWorkstationEvents(): WorkstationEventConnection {
             return;
           }
           if (event.lastEventId !== "") {
+            lastReceivedEventId = event.lastEventId;
             setLastEventId(event.lastEventId);
           }
           if (isTaskProjectionEvent(eventName)) {

@@ -12,7 +12,16 @@ export function ContextInspector(): ReactNode {
       <h2 className="ny-workstation__inspector-heading">{hasTaskContext ? "已选择任务" : "工作台状态"}</h2>
       <div className="ny-workstation__inspector-state">
         {hasTaskContext ? <ListChecks aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" /> : <CircleDotDashed aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />}
-        <p>{hasTaskContext ? `任务 ${taskId} 的详细进度和恢复操作将在此处显示。` : "从任务库选择一项，即可在不离开当前工作区的情况下查看状态。"}</p>
+        <p lang="zh-CN">
+          {hasTaskContext ? (
+            <>
+              <span className="ny-workstation__inspector-task-reference">任务 {taskId}</span>
+              的详细进度和恢复操作将在此处显示。
+            </>
+          ) : (
+            "从任务库选择一项，即可在不离开当前工作区的情况下查看状态。"
+          )}
+        </p>
       </div>
     </aside>
   );

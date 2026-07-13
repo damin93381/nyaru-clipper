@@ -159,6 +159,46 @@ def test_events_endpoint_declares_sse_response() -> None:
     assert response.headers["x-accel-buffering"] == "no"
 
 
+def test_events_endpoint_uses_query_cursor_when_header_is_absent(monkeypatch) -> None:
+    from app.api.routes import workstation_events
+
+    async def captured_stream(last_event_id: int | None, heartbeat_seconds: float) -> AsyncIterator[str]:
+        yield f": cursor={last_event_id}; heartbeat={heartbeat_seconds}\n\n"
+
+    monkeypatch.setattr(workstation_events, "iter_events", captured_stream)
+
+    # Given: a manual EventSource replacement with its last durable event ID in the URL.
+    # When: the SSE endpoint constructs its stream without a Last-Event-ID header.
+    async def build_response():
+        return await workstation_events.workstation_events_endpoint(last_event_id=None, cursor=17)
+
+    response = anyio.run(build_response)
+    frame = anyio.run(_read_frames, response.body_iterator, 1)[0]
+
+    # Then: replay starts after the URL cursor rather than replaying it again.
+    assert frame == ": cursor=17; heartbeat=15\n\n"
+
+
+def test_events_endpoint_prefers_last_event_id_header_over_query_cursor(monkeypatch) -> None:
+    from app.api.routes import workstation_events
+
+    async def captured_stream(last_event_id: int | None, heartbeat_seconds: float) -> AsyncIterator[str]:
+        yield f": cursor={last_event_id}; heartbeat={heartbeat_seconds}\n\n"
+
+    monkeypatch.setattr(workstation_events, "iter_events", captured_stream)
+
+    # Given: a browser-managed reconnect that supplies both compatible cursor mechanisms.
+    # When: the durable header and a stale URL cursor disagree.
+    async def build_response():
+        return await workstation_events.workstation_events_endpoint(last_event_id=19, cursor=17)
+
+    response = anyio.run(build_response)
+    frame = anyio.run(_read_frames, response.body_iterator, 1)[0]
+
+    # Then: native Last-Event-ID behavior remains authoritative.
+    assert frame == ": cursor=19; heartbeat=15\n\n"
+
+
 def test_v2_task_creation_stages_a_public_created_event(database) -> None:
     from fastapi.testclient import TestClient
 

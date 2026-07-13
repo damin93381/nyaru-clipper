@@ -99,6 +99,24 @@ describe("WorkstationApp", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["workstation", "queue"] });
   });
 
+  it("resumes a manual EventSource replacement after the last durable event without a duplicate cursor", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", EventSourceHarness);
+    renderWorkstation(<WorkstationApp />);
+
+    const firstSource = latestEventSource();
+    act(() => {
+      firstSource?.emit("task.updated", { task_id: "task-42", status: "running" }, "17");
+      firstSource?.emitError();
+      vi.advanceTimersByTime(1_000);
+    });
+
+    const replacementSource = latestEventSource();
+
+    expect(replacementSource).not.toBe(firstSource);
+    expect(new URL(replacementSource?.url ?? "http://example.test").searchParams.get("cursor")).toBe("17");
+  });
+
   it("activates polling after five connection failures without clearing cached task data", () => {
     vi.useFakeTimers();
     vi.stubGlobal("EventSource", EventSourceHarness);
@@ -153,5 +171,12 @@ describe("WorkstationApp", () => {
     fireEvent.keyDown(queueLink, { key: "Enter" });
 
     expect(queueLink).toHaveFocus();
+  });
+
+  it("keeps the task reference together in the CJK inspector copy", () => {
+    vi.stubGlobal("EventSource", EventSourceHarness);
+    renderWorkstation(<WorkstationApp />, { route: "/tasks/task-42" });
+
+    expect(screen.getByText("任务 task-42")).toHaveClass("ny-workstation__inspector-task-reference");
   });
 });

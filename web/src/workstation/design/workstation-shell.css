@@ -86,6 +86,11 @@
   background: var(--ny-surface-muted);
 }
 
+.ny-workstation__navigation-link:focus-visible {
+  outline: 3px solid var(--ny-focus);
+  outline-offset: 2px;
+}
+
 .ny-workstation__navigation-link.active {
   border-left-color: var(--ny-accent);
   color: var(--ny-ink);
@@ -98,6 +103,15 @@
   color: var(--ny-ink-muted);
   font-size: var(--ny-font-body);
   line-height: var(--ny-line-body);
+}
+
+.ny-workstation__inspector-state p {
+  line-break: strict;
+  text-wrap: pretty;
+}
+
+.ny-workstation__inspector-task-reference {
+  white-space: nowrap;
 }
 
 .ny-workstation__sidebar-note {
