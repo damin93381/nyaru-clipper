@@ -131,6 +131,79 @@ def test_post_clips_exports_confirmed_candidate(client: TestClient, backend_env,
     assert candidate_status == "exported"
 
 
+def test_post_clips_persists_public_stage_event_after_successful_manual_export(
+    client: TestClient, backend_env, monkeypatch
+) -> None:
+    # Given: a manually exportable candidate and an ffmpeg invocation that creates its output.
+    task_id, candidate_id = _seed_task_with_candidate(Path(backend_env["data_dir"]))
+
+    def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        output_path = Path(args[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"clip")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    # When: the v1 clip export route completes the manual export transaction.
+    response = client.post(f"/api/tasks/{task_id}/clips", json={"candidate_id": candidate_id})
+
+    # Then: the committed stage state has a replayable public projection.
+    from app.db import session_scope
+    from app.models import WorkstationEvent
+
+    with session_scope() as session:
+        events = session.exec(
+            select(WorkstationEvent)
+            .where(WorkstationEvent.entity_id == task_id)
+            .where(WorkstationEvent.event_type == "stage.updated")
+        ).all()
+        payloads = [json.loads(event.payload_json) for event in events]
+    assert response.status_code == 201
+    assert {
+        "task_id": task_id,
+        "stage_name": "export",
+        "status": "success",
+        "failure_code": None,
+        "attempts": 0,
+    } in payloads
+
+
+def test_post_clips_persists_task_and_stage_events_after_failed_manual_export(
+    client: TestClient, backend_env, monkeypatch
+) -> None:
+    # Given: an exportable candidate whose ffmpeg command fails.
+    task_id, candidate_id = _seed_task_with_candidate(Path(backend_env["data_dir"]))
+
+    def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="ffmpeg failed")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    # When: the v1 clip export route handles that failed manual export.
+    response = client.post(f"/api/tasks/{task_id}/clips", json={"candidate_id": candidate_id})
+
+    # Then: its internally committed failed task and export stage are both replayable.
+    from app.db import session_scope
+    from app.models import WorkstationEvent
+
+    with session_scope() as session:
+        events = session.exec(select(WorkstationEvent).where(WorkstationEvent.entity_id == task_id)).all()
+        payloads_by_type = [(event.event_type, json.loads(event.payload_json)) for event in events]
+    assert response.status_code == 400
+    assert ("task.updated", {"task_id": task_id, "status": "failed"}) in payloads_by_type
+    assert (
+        "stage.updated",
+        {
+            "task_id": task_id,
+            "stage_name": "export",
+            "status": "failed",
+            "failure_code": None,
+            "attempts": 0,
+        },
+    ) in payloads_by_type
+
+
 def test_post_clips_rejects_invalid_range(client: TestClient, backend_env) -> None:
     task_id, candidate_id = _seed_task_with_candidate(Path(backend_env["data_dir"]))
 

@@ -15,6 +15,7 @@ from typing import Any, Callable
 from sqlmodel import Session, select
 
 import app.models as models
+from app.services.workstation_events import publish_stage_updated, publish_task_updated
 
 PROCESS_GROUP_POLL_INTERVAL_SECONDS = 0.2
 
@@ -578,7 +579,11 @@ def set_stage_status(
         stage.finished_at = now
         task = session.get(models.Task, task_id)
         if task is not None:
+            task_status_changed = task.status != "failed"
             task.status = "failed"
             task.updated_at = now
             session.add(task)
+            if task_status_changed:
+                publish_task_updated(session, task)
     session.add(stage)
+    publish_stage_updated(session, stage)
