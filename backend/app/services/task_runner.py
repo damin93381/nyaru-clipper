@@ -65,6 +65,10 @@ class TaskRunResult:
 StageExecutor = Callable[[Session, str], Any]
 
 
+class LocalCopyFailure(RuntimeError):
+    """A stable worker diagnostic that never includes a trusted local path."""
+
+
 def _execute_ingest(session: Session, task_id: str):
     media_source = session.exec(select(MediaSource).where(MediaSource.task_id == task_id)).first()
     if media_source is not None and media_source.kind == "local" and media_source.import_mode == "reference":
@@ -100,7 +104,10 @@ def _execute_ingest(session: Session, task_id: str):
     if media_source is not None and media_source.kind == "local" and media_source.import_mode == "copy":
         local_source = resolve_persisted_local_media_source(media_source.metadata_json)
         copy_path = ensure_task_dirs(task_id)["raw"] / f"source{local_source.path.suffix.casefold()}"
-        shutil.copy2(local_source.path, copy_path)
+        try:
+            shutil.copy2(local_source.path, copy_path)
+        except OSError as exc:
+            raise LocalCopyFailure("Unable to copy local source video") from exc
         persist_artifact_metadata(
             session,
             task_id=task_id,

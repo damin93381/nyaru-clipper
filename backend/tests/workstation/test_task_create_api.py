@@ -196,6 +196,48 @@ def test_v2_local_copy_task_fails_ingest_with_a_safe_diagnostic_if_the_source_is
     assert str(client.local_root) not in summary
 
 
+def test_v2_local_copy_task_sanitizes_copy_io_errors_before_persisting_stage_failure(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    # Given: a local copy whose filesystem operation reports a trusted host path.
+    payload = {
+        "source": {
+            "kind": "local",
+            "root_id": _root_id(client),
+            "relative_path": "vod/example.mp4",
+            "import_mode": "copy",
+        },
+        "profile_id": "standard",
+        "priority": 0,
+    }
+    task_id = client.post("/api/v2/tasks", json=payload).json()["task_id"]
+
+    import app.services.task_runner as task_runner
+
+    def fail_copy(source: Path, destination: Path) -> None:
+        raise OSError(f"Cannot read {source}")
+
+    monkeypatch.setattr(task_runner.shutil, "copy2", fail_copy)
+    from app.db import session_scope
+    from app.models import TaskStage
+    from app.services.storage import log_file_for_stage
+
+    # When: ingest attempts the task-owned copy.
+    with session_scope() as session:
+        with pytest.raises(RuntimeError, match="Unable to copy local source video"):
+            task_runner.run_task_pipeline(session, task_id)
+        ingest = session.exec(select(TaskStage).where(TaskStage.task_id == task_id, TaskStage.name == "ingest")).one()
+        summary = ingest.summary
+        log_contents = log_file_for_stage(task_id, "ingest").read_text(encoding="utf-8")
+
+    # Then: durable stage state contains a stable diagnostic, never the trusted source path.
+    assert summary == "Unable to copy local source video"
+    assert str(client.local_root) not in summary
+    assert "Unable to copy local source video" in log_contents
+    assert str(client.local_root) not in log_contents
+
+
 def test_v2_local_reference_task_keeps_trusted_root_paths_out_of_persisted_and_returned_data(
     client: TestClient,
     monkeypatch,

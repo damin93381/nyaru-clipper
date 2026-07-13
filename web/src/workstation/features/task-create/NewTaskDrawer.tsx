@@ -38,7 +38,7 @@ type ValidatedSource =
 type CreateTaskState =
   | { readonly bilibiliUrl: string; readonly errors: FieldErrors; readonly sourceKind: SourceKind | null; readonly step: "source" }
   | { readonly errors: FieldErrors; readonly inspection: BilibiliInspection | null; readonly source: DraftSource; readonly step: "inspect" }
-  | { readonly errors: FieldErrors; readonly priority: number; readonly profileId: string; readonly source: ValidatedSource; readonly step: "options" }
+  | { readonly errors: FieldErrors; readonly footerError: string | null; readonly priority: number; readonly profileId: string; readonly source: ValidatedSource; readonly step: "options" }
   | { readonly priority: number; readonly profileId: string; readonly request: CreateTaskRequest; readonly source: ValidatedSource; readonly step: "submitting" };
 
 type CreateTaskAction =
@@ -50,9 +50,10 @@ type CreateTaskAction =
   | { readonly kind: "open-options" }
   | { readonly kind: "set-options"; readonly priority?: number; readonly profileId?: string }
   | { readonly kind: "set-submit"; readonly request: CreateTaskRequest }
-  | { readonly errors: FieldErrors; readonly kind: "submission-failed" }
+  | { readonly errors: FieldErrors; readonly footerError: string | null; readonly kind: "submission-failed" }
   | { readonly kind: "set-source-error"; readonly message: string }
-  | { readonly kind: "back-to-source" };
+  | { readonly kind: "back-to-source" }
+  | { readonly kind: "reset" };
 
 const initialState: CreateTaskState = { bilibiliUrl: "", errors: {}, sourceKind: null, step: "source" };
 
@@ -80,6 +81,7 @@ function createTaskReducer(state: CreateTaskState, action: CreateTaskAction): Cr
       }
       return {
         errors: {},
+        footerError: null,
         priority: 0,
         profileId: "standard",
         source,
@@ -87,14 +89,16 @@ function createTaskReducer(state: CreateTaskState, action: CreateTaskAction): Cr
       };
     }
     case "set-options":
-      return state.step === "options" ? { ...state, errors: {}, priority: action.priority ?? state.priority, profileId: action.profileId ?? state.profileId } : state;
+      return state.step === "options" ? { ...state, errors: {}, footerError: null, priority: action.priority ?? state.priority, profileId: action.profileId ?? state.profileId } : state;
     case "set-submit":
       return state.step === "options" ? { priority: state.priority, profileId: state.profileId, request: action.request, source: state.source, step: "submitting" } : state;
     case "submission-failed":
-      return state.step === "submitting" ? { errors: action.errors, priority: state.priority, profileId: state.profileId, source: state.source, step: "options" } : state;
+      return state.step === "submitting" ? { errors: action.errors, footerError: action.footerError, priority: state.priority, profileId: state.profileId, source: state.source, step: "options" } : state;
     case "set-source-error":
       return state.step === "source" ? { ...state, errors: { source: action.message } } : state;
     case "back-to-source":
+      return initialState;
+    case "reset":
       return initialState;
     default:
       return state;
@@ -104,7 +108,7 @@ function createTaskReducer(state: CreateTaskState, action: CreateTaskAction): Cr
 function isBilibiliUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "https:" && (parsed.hostname === "www.bilibili.com" || parsed.hostname === "bilibili.com" || parsed.hostname === "b23.tv");
+    return parsed.protocol === "https:";
   } catch {
     return false;
   }
@@ -140,11 +144,15 @@ export function NewTaskDrawer({ onOpenChange, open }: NewTaskDrawerProps): React
   const profilesQuery = useQuery({ enabled: state.step === "options" || state.step === "submitting", queryKey: ["workstation", "processing-profiles"], queryFn: getProcessingProfiles });
   const createMutation = useMutation({
     mutationFn: createWorkstationTask,
-    onError: (error) => dispatch({ errors: error instanceof TaskCreateApiError ? error.fieldErrors : {}, kind: "submission-failed" }),
+    onError: (error) => {
+      const errors = error instanceof TaskCreateApiError ? error.fieldErrors : {};
+      dispatch({ errors, footerError: Object.keys(errors).length === 0 ? messageFor(error) : null, kind: "submission-failed" });
+    },
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: workstationKeys.summary });
       await queryClient.invalidateQueries({ queryKey: workstationKeys.queue });
       await queryClient.invalidateQueries({ queryKey: workstationKeys.all });
+      dispatch({ kind: "reset" });
       onOpenChange(false);
       navigate(`/workstation/tasks/${result.task_id}`);
     },
@@ -174,7 +182,7 @@ export function NewTaskDrawer({ onOpenChange, open }: NewTaskDrawerProps): React
     if (state.step !== "options") return;
     const request = requestFor(state.source, state.profileId, state.priority);
     if (request === null) {
-      dispatch({ kind: "submission-failed", errors: { profile_id: "当前工作站只支持 Standard 处理配置。" } });
+      dispatch({ kind: "submission-failed", errors: { profile_id: "当前工作站只支持 Standard 处理配置。" }, footerError: null });
       return;
     }
     dispatch({ kind: "set-submit", request });
@@ -191,10 +199,10 @@ export function NewTaskDrawer({ onOpenChange, open }: NewTaskDrawerProps): React
           <Dialog.Description className="ny-overlay__description" id="task-create-description">先核验来源，再用标准处理配置把任务放入单 GPU 队列。</Dialog.Description>
           {state.step === "source" ? <section className="ny-task-create__step"><div className="ny-task-create__source-switch"><button aria-pressed={state.sourceKind === "bilibili"} className="ny-button" onClick={() => dispatch({ kind: "select-source", sourceKind: "bilibili" })} type="button"><ExternalLink aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />Bilibili 录播</button><button aria-pressed={state.sourceKind === "local"} className="ny-button" onClick={() => dispatch({ kind: "select-source", sourceKind: "local" })} type="button"><FileVideo2 aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />本地文件</button></div>{state.sourceKind === "bilibili" ? <BilibiliSourceStep error={state.errors.source} isInspecting={inspectionMutation.isPending} onInspect={inspectSource} onUrlChange={(url) => dispatch({ kind: "set-bilibili-url", url })} url={state.bilibiliUrl} /> : null}{state.sourceKind === "local" ? <LocalSourceStep onSelect={chooseLocalSource} /> : null}</section> : null}
           {state.step === "inspect" ? <section className="ny-task-create__step"><Preview inspection={state.inspection} source={state.source} />{state.source.kind === "local" ? <div className="ny-task-create__radio-actions"><button className={`ny-button${localImportMode === "reference" ? " ny-button--primary" : ""}`} onClick={() => dispatch({ importMode: "reference", kind: "set-import-mode" })} role="radio" aria-checked={localImportMode === "reference"} type="button"><CheckCircle2 aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />引用原始文件</button><button className={`ny-button${localImportMode === "copy" ? " ny-button--primary" : ""}`} onClick={() => dispatch({ importMode: "copy", kind: "set-import-mode" })} role="radio" aria-checked={localImportMode === "copy"} type="button"><Copy aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />复制到任务存储</button></div> : null}<div className="ny-overlay__actions"><button className="ny-button ny-button--quiet" onClick={() => dispatch({ kind: "back-to-source" })} type="button">重新选择</button><button className="ny-button ny-button--primary" onClick={() => dispatch({ kind: "open-options" })} type="button">继续设置</button></div></section> : null}
-          {state.step === "options" || state.step === "submitting" ? <section className="ny-task-create__step"><TaskOptionsStep errors={state.step === "options" ? state.errors : {}} onPriorityChange={(priority) => dispatch({ kind: "set-options", priority })} onProfileChange={(profileId) => dispatch({ kind: "set-options", profileId })} priority={state.priority} profileId={state.profileId} profiles={profilesQuery.data ?? []} />{profilesQuery.isError ? <p className="ny-field__message ny-field__message--error">处理配置暂时不可读取；仍会验证默认 Standard 配置。</p> : null}<div className="ny-overlay__actions"><button className="ny-button ny-button--quiet" disabled={state.step === "submitting"} onClick={() => dispatch({ kind: "back-to-source" })} type="button">重新选择来源</button><button className="ny-button ny-button--primary" disabled={state.step === "submitting"} onClick={submit} type="button"><Plus aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />{state.step === "submitting" ? "正在创建任务" : "创建任务"}</button></div></section> : null}
+          {state.step === "options" || state.step === "submitting" ? <section className="ny-task-create__step"><TaskOptionsStep errors={state.step === "options" ? state.errors : {}} onPriorityChange={(priority) => dispatch({ kind: "set-options", priority })} onProfileChange={(profileId) => dispatch({ kind: "set-options", profileId })} priority={state.priority} profileId={state.profileId} profiles={profilesQuery.data ?? []} />{profilesQuery.isError ? <p className="ny-field__message ny-field__message--error">处理配置暂时不可读取；仍会验证默认 Standard 配置。</p> : null}<div className="ny-overlay__actions"><button className="ny-button ny-button--quiet" disabled={state.step === "submitting"} onClick={() => dispatch({ kind: "back-to-source" })} type="button">重新选择来源</button><button className="ny-button ny-button--primary" disabled={state.step === "submitting"} onClick={submit} type="button"><Plus aria-hidden="true" size="var(--ny-icon-default)" strokeWidth="var(--ny-icon-stroke)" />{state.step === "submitting" ? "正在创建任务" : "创建任务"}</button></div>{state.step === "options" && state.footerError !== null ? <footer className="ny-task-create__footer-error" role="status">{state.footerError}</footer> : null}</section> : null}
         </Dialog.Content>
       </Dialog.Portal>
-      <Dialog.Root open={discardOpen} onOpenChange={setDiscardOpen}><Dialog.Portal><Dialog.Overlay className="ny-dialog-overlay" /><Dialog.Content aria-describedby="task-create-discard-description" className="ny-overlay ny-dialog" role="alertdialog"><Dialog.Title className="ny-overlay__title">放弃未保存的任务设置？</Dialog.Title><Dialog.Description className="ny-overlay__description" id="task-create-discard-description">当前来源和队列设置尚未创建任务。</Dialog.Description><div className="ny-overlay__actions"><button className="ny-button" onClick={() => setDiscardOpen(false)} type="button">继续编辑</button><button className="ny-button ny-button--danger" onClick={() => { setDiscardOpen(false); onOpenChange(false); }} type="button">放弃更改</button></div></Dialog.Content></Dialog.Portal></Dialog.Root>
+      <Dialog.Root open={discardOpen} onOpenChange={setDiscardOpen}><Dialog.Portal><Dialog.Overlay className="ny-dialog-overlay" /><Dialog.Content aria-describedby="task-create-discard-description" className="ny-overlay ny-dialog" role="alertdialog"><Dialog.Title className="ny-overlay__title">放弃未保存的任务设置？</Dialog.Title><Dialog.Description className="ny-overlay__description" id="task-create-discard-description">当前来源和队列设置尚未创建任务。</Dialog.Description><div className="ny-overlay__actions"><button className="ny-button" onClick={() => setDiscardOpen(false)} type="button">继续编辑</button><button className="ny-button ny-button--danger" onClick={() => { dispatch({ kind: "reset" }); setDiscardOpen(false); onOpenChange(false); }} type="button">放弃更改</button></div></Dialog.Content></Dialog.Portal></Dialog.Root>
     </Dialog.Root>
   );
 }

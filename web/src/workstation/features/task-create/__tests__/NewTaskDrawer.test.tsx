@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
@@ -26,6 +27,24 @@ function renderDrawer(): QueryClient {
     </QueryClientProvider>,
   );
   return queryClient;
+}
+
+function ControlledDrawer(): ReactNode {
+  const [open, setOpen] = useState(true);
+
+  return <><NewTaskDrawer open={open} onOpenChange={setOpen} /><button onClick={() => setOpen(true)} type="button">重新打开新建任务</button></>;
+}
+
+function renderControlledDrawer(): void {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/workstation"]}>
+        <ControlledDrawer />
+        <CurrentLocation />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
 }
 
 async function request(input: RequestInfo | URL, init?: RequestInit): Promise<{ readonly body: unknown; readonly method: string; readonly url: URL }> {
@@ -135,5 +154,102 @@ describe("NewTaskDrawer", () => {
     expect(await screen.findByRole("alertdialog", { name: "放弃未保存的任务设置？" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "继续编辑" }));
     expect(screen.getByRole("spinbutton", { name: "优先级" })).toHaveValue(99);
+  });
+
+  it("resets a successful draft before the global drawer is reopened", async () => {
+    // Given: one successful inspected source creation in a controlled global drawer.
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const next = await request(input, init);
+      if (next.url.pathname === "/api/v2/sources/bilibili/inspect") return response({ normalized_url: "https://www.bilibili.com/video/BV1reset", source_video_id: "BV1reset", title: "重开测试", uploader: null, duration_seconds: null });
+      if (next.url.pathname === "/api/v2/processing-profiles") return response({ profiles: [{ id: "standard", name: "Standard", stages: ["ingest"] }] });
+      if (next.url.pathname === "/api/v2/tasks") return response({ task_id: "task-reset", profile_id: "standard", priority: 6, status: "pending" }, 201);
+      return response({ roots: [], root_id: null, relative_path: "", entries: [] });
+    });
+    renderControlledDrawer();
+
+    // When: the operator completes a draft and opens the drawer again.
+    fireEvent.click(screen.getByRole("button", { name: "Bilibili 录播" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Bilibili 链接" }), { target: { value: "https://www.bilibili.com/video/BV1reset" } });
+    fireEvent.click(screen.getByRole("button", { name: "检查来源" }));
+    fireEvent.click(await screen.findByRole("button", { name: "继续设置" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "优先级" }), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "新建任务" })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "重新打开新建任务" }));
+
+    // Then: reopening begins at a blank source choice, not at the old submitting form.
+    expect(await screen.findByRole("button", { name: "Bilibili 录播" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "创建任务" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Bilibili 录播" }));
+    expect(screen.getByRole("textbox", { name: "Bilibili 链接" })).toHaveValue("");
+  });
+
+  it("resets a confirmed discarded draft before reopening", async () => {
+    // Given: a dirty Bilibili source draft in the controlled global drawer.
+    vi.stubGlobal("fetch", async () => response({ roots: [], root_id: null, relative_path: "", entries: [] }));
+    renderControlledDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Bilibili 录播" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Bilibili 链接" }), { target: { value: "https://m.bilibili.com/video/BV1discard" } });
+
+    // When: the operator confirms that the draft should be discarded and opens the drawer again.
+    fireEvent.click(screen.getByRole("button", { name: "关闭新建任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "放弃更改" }));
+    fireEvent.click(screen.getByRole("button", { name: "重新打开新建任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Bilibili 录播" }));
+
+    // Then: the discarded URL cannot leak into the next draft.
+    expect(screen.getByRole("textbox", { name: "Bilibili 链接" })).toHaveValue("");
+  });
+
+  it("shows one safe footer error for a nonfield create failure and preserves the options", async () => {
+    // Given: creation fails with a server detail that must not be exposed as a field error.
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const next = await request(input, init);
+      if (next.url.pathname === "/api/v2/sources/bilibili/inspect") return response({ normalized_url: "https://www.bilibili.com/video/BV1server", source_video_id: "BV1server", title: "保留选项", uploader: null, duration_seconds: null });
+      if (next.url.pathname === "/api/v2/processing-profiles") return response({ profiles: [{ id: "standard", name: "Standard", stages: ["ingest"] }] });
+      if (next.url.pathname === "/api/v2/tasks") return response({ detail: "Local path /private/media/source.mp4 disappeared" }, 500);
+      return response({ roots: [], root_id: null, relative_path: "", entries: [] });
+    });
+    renderDrawer();
+
+    // When: a fully inspected draft reaches a nonfield server failure.
+    fireEvent.click(screen.getByRole("button", { name: "Bilibili 录播" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Bilibili 链接" }), { target: { value: "https://www.bilibili.com/video/BV1server" } });
+    fireEvent.click(screen.getByRole("button", { name: "检查来源" }));
+    fireEvent.click(await screen.findByRole("button", { name: "继续设置" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "优先级" }), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
+
+    // Then: the generic message appears exactly once in the drawer footer and the draft remains editable.
+    expect(await screen.findByText("任务没有创建，请重试。")).toBeVisible();
+    expect(screen.getAllByText("任务没有创建，请重试。")).toHaveLength(1);
+    expect(screen.getByRole("spinbutton", { name: "优先级" })).toHaveValue(8);
+    expect(screen.queryByText("/private/media/source.mp4")).not.toBeInTheDocument();
+  });
+
+  it("defers a supported Bilibili subdomain to the inspect endpoint", async () => {
+    // Given: the backend accepts m.bilibili.com and returns its normal inspected source.
+    const inspectUrls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const next = await request(input, init);
+      if (next.url.pathname === "/api/v2/sources/bilibili/inspect") {
+        if (typeof next.body !== "object" || next.body === null || !("url" in next.body) || typeof next.body.url !== "string") {
+          throw new TypeError("Inspect request must contain a URL.");
+        }
+        inspectUrls.push(next.body.url);
+        return response({ normalized_url: "https://www.bilibili.com/video/BV1mobile", source_video_id: "BV1mobile", title: "移动端录播", uploader: null, duration_seconds: null });
+      }
+      return response({ roots: [], root_id: null, relative_path: "", entries: [] });
+    });
+    renderDrawer();
+
+    // When: an m.bilibili.com source is inspected.
+    fireEvent.click(screen.getByRole("button", { name: "Bilibili 录播" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Bilibili 链接" }), { target: { value: "https://m.bilibili.com/video/BV1mobile" } });
+    fireEvent.click(screen.getByRole("button", { name: "检查来源" }));
+
+    // Then: the frontend does not reject the valid server-supported host.
+    expect(await screen.findByText("移动端录播")).toBeVisible();
+    expect(inspectUrls).toEqual(["https://m.bilibili.com/video/BV1mobile"]);
   });
 });

@@ -378,6 +378,7 @@
 .ny-task-create__preview p:not(.ny-workstation__eyebrow) { color: var(--ny-ink-muted); font-size: var(--ny-font-body); line-height: var(--ny-line-body); }
 .ny-task-create__technical { overflow-wrap: anywhere; font-family: var(--ny-font-mono); font-size: var(--ny-font-caption) !important; }
 .ny-task-create__radio-actions [role="radio"][aria-checked="true"] { color: var(--ny-surface); border-color: var(--ny-accent); background: var(--ny-accent); }
+.ny-task-create__footer-error { margin: 0; padding: var(--ny-space-3); border-top: 1px solid color-mix(in srgb, var(--ny-danger) 35%, var(--ny-border)); color: var(--ny-danger); background: color-mix(in srgb, var(--ny-danger) 8%, var(--ny-surface)); font-size: var(--ny-font-caption); line-height: var(--ny-line-body); }
 
 .ny-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
