@@ -125,6 +125,28 @@ describe("TaskLibraryPage", () => {
     await waitFor(() => expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("tag")).toBe("待复核"));
   });
 
+  it("persists date and readiness filters in the URL and sends them to the server", async () => {
+    const requestedUrls: URL[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      requestedUrls.push(url);
+      if (url.pathname.endsWith("/summary")) return jsonResponse({ active: 0, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 0 });
+      return jsonResponse({ items: [listItem], page: 1, page_count: 1, page_size: 50, total: 1 });
+    });
+
+    await renderTaskLibrary("/workstation?updatedFrom=2026-07-01&updatedTo=2026-07-12&readiness=missing");
+
+    expect(await screen.findByLabelText("更新开始日期")).toHaveValue("2026-07-01");
+    expect(screen.getByLabelText("更新结束日期")).toHaveValue("2026-07-12");
+    expect(screen.getByLabelText("产物状态")).toHaveValue("missing");
+    expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("updated_from")).toBe("2026-07-01T00:00:00.000Z");
+    expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("updated_to")).toBe("2026-07-12T23:59:59.999Z");
+    expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("readiness")).toBe("missing");
+
+    fireEvent.change(screen.getByLabelText("产物状态"), { target: { value: "failed" } });
+    await waitFor(() => expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("readiness")).toBe("failed"));
+  });
+
   it("requests the next page from the server", async () => {
     const requestedUrls: URL[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
@@ -181,6 +203,33 @@ describe("TaskLibraryPage", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("task-42：仍在处理中");
     expect(row).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("confirms bulk tag and requeue requests and reports each requeue result", async () => {
+    const bulkBodies: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (url.pathname.endsWith("/summary")) return jsonResponse({ active: 1, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 0 });
+      if (url.pathname.endsWith("/bulk")) {
+        const requestBody = input instanceof Request ? await input.clone().json() : JSON.parse(init?.body?.toString() ?? "{}");
+        bulkBodies.push(requestBody);
+        return jsonResponse({ results: [{ task_id: "task-42", status: "rejected", message: "仍在处理中" }] });
+      }
+      return jsonResponse({ items: [listItem], page: 1, page_count: 1, page_size: 50, total: 1 });
+    });
+
+    await renderTaskLibrary();
+    const row = await screen.findByRole("row", { name: new RegExp(taskTitle.slice(0, 24)) });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole("button", { name: "标记选中任务" }));
+    fireEvent.change(await screen.findByLabelText("批量标签"), { target: { value: "精选，待复核" } });
+    fireEvent.click(screen.getByRole("button", { name: "确认标记" }));
+    await waitFor(() => expect(bulkBodies).toContainEqual({ operation: "set_tags", task_ids: ["task-42"], tags: ["精选", "待复核"] }));
+    expect(await screen.findByRole("status")).toHaveTextContent("task-42：仍在处理中");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新排队选中任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认重新排队" }));
+    await waitFor(() => expect(bulkBodies).toContainEqual({ operation: "requeue", task_ids: ["task-42"] }));
   });
 
   it("provides recoverable empty and load-failure states", async () => {

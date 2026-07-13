@@ -168,9 +168,71 @@ def _list_conditions(session: Session, query: TaskListQuery) -> list[object]:
         conditions.append(
             exists(select(TaskTagLink.task_id).where(TaskTagLink.task_id == Task.id).where(TaskTagLink.tag_name == query.tag))
         )
+    if query.updated_from is not None:
+        conditions.append(Task.updated_at >= query.updated_from)
+    if query.updated_to is not None:
+        conditions.append(Task.updated_at <= query.updated_to)
+    if query.readiness is not None:
+        conditions.append(_readiness_condition(query.readiness))
     if query.query:
         conditions.append(_search_condition(session, query.query))
     return conditions
+
+
+def _readiness_condition(readiness: str) -> object:
+    """Filter by the persisted stage/artifact readiness signal used by the library."""
+    expected_stage_names = tuple(_EXPECTED_ARTIFACTS)
+    artifact_matches_own_stage = or_(
+        *(
+            and_(Artifact.stage_name == stage_name, Artifact.kind.in_(stored_kinds))
+            for stage_name, (_, stored_kinds) in _EXPECTED_ARTIFACTS.items()
+        )
+    )
+    artifact_matches_current_stage = or_(
+        *(
+            and_(TaskStage.name == stage_name, Artifact.kind.in_(stored_kinds))
+            for stage_name, (_, stored_kinds) in _EXPECTED_ARTIFACTS.items()
+        )
+    )
+    ready_artifact = exists(
+        select(Artifact.id)
+        .where(Artifact.task_id == Task.id)
+        .where(artifact_matches_own_stage)
+    )
+    failed_stage = exists(
+        select(TaskStage.id).where(TaskStage.task_id == Task.id).where(TaskStage.status == "failed")
+    )
+    missing_artifact = exists(
+        select(TaskStage.id)
+        .where(TaskStage.task_id == Task.id)
+        .where(TaskStage.name.in_(expected_stage_names))
+        .where(TaskStage.status == "success")
+        .where(
+            ~exists(
+                select(Artifact.id)
+                .where(Artifact.task_id == Task.id)
+                .where(Artifact.stage_name == TaskStage.name)
+                .where(artifact_matches_current_stage)
+            )
+        )
+    )
+    not_ready_stage = exists(
+        select(TaskStage.id)
+        .where(TaskStage.task_id == Task.id)
+        .where(TaskStage.name.in_(expected_stage_names))
+        .where(TaskStage.status.not_in(("success", "failed")))
+    )
+    match readiness:
+        case "ready":
+            return ready_artifact
+        case "missing":
+            return missing_artifact
+        case "failed":
+            return failed_stage
+        case "not_ready":
+            return not_ready_stage
+        case unreachable:
+            assert_never(unreachable)
 
 
 def _search_condition(session: Session, query: str) -> object:

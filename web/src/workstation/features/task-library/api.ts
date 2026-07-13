@@ -7,7 +7,7 @@ import { toTaskListQuery } from "./filters";
 export type TaskListItem = components["schemas"]["TaskListItem"];
 export type TaskLibrarySummary = components["schemas"]["TaskLibrarySummary"];
 export type TaskOverview = components["schemas"]["TaskOverview"];
-export type BulkTaskMutationOperation = "archive" | "unarchive" | "delete";
+export type BulkTaskMutationOperation = components["schemas"]["BulkTaskMutationRequest"]["operation"];
 export type BulkTaskMutationResponse = components["schemas"]["BulkTaskMutationResponse"];
 
 export class TaskLibraryApiError extends Error {
@@ -24,12 +24,12 @@ async function requireData<Result>(request: Promise<{ readonly data?: Result; re
 }
 
 export function getTaskLibrarySummary(): Promise<TaskLibrarySummary> {
-  return requireData(workstationClient.GET("/api/v2/tasks/summary"), "任务库摘要无法读取");
+  return requireData(workstationClient.GET("/api/v2/tasks/summary", { parseAs: "json" }), "任务库摘要无法读取");
 }
 
 export function getTaskLibraryPage(filters: TaskLibraryFilters): Promise<components["schemas"]["TaskListPage"]> {
   return requireData(
-    workstationClient.GET("/api/v2/tasks", { params: { query: toTaskListQuery(filters) } }),
+    workstationClient.GET("/api/v2/tasks", { params: { query: toTaskListQuery(filters) }, parseAs: "json" }),
     "任务库无法读取",
   );
 }
@@ -45,6 +45,13 @@ export function updateTaskMetadata(taskId: string, metadata: components["schemas
   );
 }
 
-export function mutateTasks(operation: BulkTaskMutationOperation, taskIds: readonly string[]): Promise<BulkTaskMutationResponse> {
-  return requireData(workstationClient.POST("/api/v2/tasks/bulk", { body: { operation, task_ids: [...taskIds] } }), "批量任务操作失败");
+export function mutateTasks(
+  operation: BulkTaskMutationOperation,
+  taskIds: readonly string[],
+  tags?: readonly string[],
+): Promise<BulkTaskMutationResponse> {
+  return requireData(
+    workstationClient.POST("/api/v2/tasks/bulk", { body: { operation, task_ids: [...taskIds], ...(tags === undefined ? {} : { tags: [...tags] }) } }),
+    "批量任务操作失败",
+  );
 }

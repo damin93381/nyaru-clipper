@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from app.models import (
     Artifact,
+    CANONICAL_STAGES,
     ClipCandidate,
     MediaSource,
     PipelineRun,
@@ -26,7 +27,7 @@ from app.models import (
 from app.services.workstation_events import publish_event, publish_task_updated
 
 
-TaskBulkOperation: TypeAlias = Literal["archive", "unarchive", "delete"]
+TaskBulkOperation: TypeAlias = Literal["archive", "unarchive", "delete", "set_tags", "requeue"]
 TaskBulkMutationStatus: TypeAlias = Literal["success", "not_found", "rejected"]
 
 
@@ -77,6 +78,8 @@ def apply_task_bulk_mutation(
     session: Session,
     task_id: str,
     operation: TaskBulkOperation,
+    *,
+    tags: tuple[str, ...] | None = None,
 ) -> TaskBulkMutationOutcome:
     """Apply one operation without committing, preserving independent batch outcomes."""
     task = session.get(Task, task_id)
@@ -94,6 +97,13 @@ def apply_task_bulk_mutation(
             task.updated_at = utc_now()
             session.add(task)
             publish_task_updated(session, task)
+        case "set_tags":
+            _replace_task_tags(session, task, tags or ())
+            task.updated_at = utc_now()
+            session.add(task)
+            publish_task_updated(session, task)
+        case "requeue":
+            return _requeue_task(session, task)
         case "delete":
             task_is_active = task.status == "running"
             if task_is_active:
@@ -106,6 +116,34 @@ def apply_task_bulk_mutation(
         case unreachable:
             assert_never(unreachable)
     return TaskBulkMutationOutcome(task_id=task_id, status="success", message=None)
+
+
+def _replace_task_tags(session: Session, task: Task, tags: tuple[str, ...]) -> None:
+    """Replace task tags with a deterministic, duplicate-free set."""
+    session.exec(delete(TaskTagLink).where(TaskTagLink.task_id == task.id))
+    for tag_name in sorted(set(tags)):
+        if session.get(TaskTag, tag_name) is None:
+            session.add(TaskTag(name=tag_name))
+        session.add(TaskTagLink(task_id=task.id, tag_name=tag_name))
+
+
+def _requeue_task(session: Session, task: Task) -> TaskBulkMutationOutcome:
+    """Retry a terminal task from its first interrupted stage, preserving queue invariants."""
+    from app.repositories.tasks import get_task_record, retry_task_from_stage
+    from app.services.workstation_queue import QueueConflict
+
+    record = get_task_record(session, task.id)
+    if record is None:
+        return TaskBulkMutationOutcome(task_id=task.id, status="not_found", message="Task not found")
+    restart_stage = next(
+        (stage.name for stage in record.stages if stage.status in {"failed", "cancelled"}),
+        CANONICAL_STAGES[0],
+    )
+    try:
+        retry_task_from_stage(session, task.id, restart_stage)
+    except QueueConflict as exc:
+        return TaskBulkMutationOutcome(task_id=task.id, status="rejected", message=str(exc))
+    return TaskBulkMutationOutcome(task_id=task.id, status="success", message=None)
 
 
 def _delete_task_owned_database_rows(session: Session, task: Task) -> None:

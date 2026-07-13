@@ -4,16 +4,21 @@ const taskStatuses = ["pending", "running", "success", "failed", "cancelled"] as
 const taskSorts = ["updated_at", "created_at", "title", "storage_bytes"] as const;
 const taskDirections = ["asc", "desc"] as const;
 const taskPageSizes = [25, 50, 100] as const;
+const artifactReadinessStatuses = ["ready", "missing", "failed", "not_ready"] as const;
 
 type TaskStatus = (typeof taskStatuses)[number];
 type TaskSort = (typeof taskSorts)[number];
 type TaskDirection = (typeof taskDirections)[number];
+type ArtifactReadinessStatus = (typeof artifactReadinessStatuses)[number];
 
 export interface TaskLibraryFilters {
   readonly query: string;
   readonly statuses: readonly TaskStatus[];
   readonly sourceKind: "all" | "bilibili" | "local";
   readonly tag: string | null;
+  readonly updatedFrom: string | null;
+  readonly updatedTo: string | null;
+  readonly readiness: ArtifactReadinessStatus | null;
   readonly sort: TaskSort;
   readonly direction: TaskDirection;
   readonly page: number;
@@ -25,6 +30,9 @@ const defaultFilters: TaskLibraryFilters = {
   statuses: [],
   sourceKind: "all",
   tag: null,
+  updatedFrom: null,
+  updatedTo: null,
+  readiness: null,
   sort: "updated_at",
   direction: "desc",
   page: 1,
@@ -54,6 +62,14 @@ function parsePositiveInteger(value: string | null, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function parseDateInput(value: string | null): string | null {
+  return value !== null && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+function isArtifactReadinessStatus(value: string | null): value is ArtifactReadinessStatus {
+  return artifactReadinessStatuses.some((status) => status === value);
+}
+
 export function parseTaskLibraryFilters(params: URLSearchParams): TaskLibraryFilters {
   const statuses = params.getAll("status").filter(isTaskStatus);
   const source = params.get("source");
@@ -62,12 +78,18 @@ export function parseTaskLibraryFilters(params: URLSearchParams): TaskLibraryFil
   const pageSize = params.get("pageSize");
   const query = params.get("query")?.trim() ?? "";
   const tag = params.get("tag")?.trim() || null;
+  const updatedFrom = parseDateInput(params.get("updatedFrom"));
+  const updatedTo = parseDateInput(params.get("updatedTo"));
+  const readiness = params.get("readiness");
 
   return {
     query,
     statuses,
     sourceKind: source === "bilibili" || source === "local" ? source : defaultFilters.sourceKind,
     tag,
+    updatedFrom,
+    updatedTo,
+    readiness: isArtifactReadinessStatus(readiness) ? readiness : null,
     sort: isTaskSort(sort) ? sort : defaultFilters.sort,
     direction: isTaskDirection(direction) ? direction : defaultFilters.direction,
     page: parsePositiveInteger(params.get("page"), defaultFilters.page),
@@ -81,6 +103,9 @@ export function serializeTaskLibraryFilters(filters: TaskLibraryFilters): URLSea
   for (const status of filters.statuses) params.append("status", status);
   if (filters.sourceKind !== "all") params.set("source", filters.sourceKind);
   if (filters.tag) params.set("tag", filters.tag);
+  if (filters.updatedFrom) params.set("updatedFrom", filters.updatedFrom);
+  if (filters.updatedTo) params.set("updatedTo", filters.updatedTo);
+  if (filters.readiness) params.set("readiness", filters.readiness);
   if (filters.sort !== defaultFilters.sort) params.set("sort", filters.sort);
   if (filters.direction !== defaultFilters.direction) params.set("direction", filters.direction);
   if (filters.page !== defaultFilters.page) params.set("page", String(filters.page));
@@ -94,6 +119,9 @@ export function toTaskListQuery(filters: TaskLibraryFilters): WorkstationTaskLis
     statuses: filters.statuses.length > 0 ? [...filters.statuses] : undefined,
     source_kind: filters.sourceKind === "all" ? undefined : filters.sourceKind,
     tag: filters.tag,
+    updated_from: filters.updatedFrom ? `${filters.updatedFrom}T00:00:00.000Z` : undefined,
+    updated_to: filters.updatedTo ? `${filters.updatedTo}T23:59:59.999Z` : undefined,
+    readiness: filters.readiness ?? undefined,
     sort: filters.sort,
     direction: filters.direction,
     page: filters.page,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from datetime import datetime, timedelta, timezone
 import pytest
 from sqlmodel import Session, select
 
@@ -63,6 +64,40 @@ def test_task_library_list_parses_filters_and_clamps_page_size(client: TestClien
     assert response.json()["page_size"] == 100
     assert response.json()["total"] == 1
     assert [item["task_id"] for item in response.json()["items"]] == ["task-000"]
+
+
+def test_task_library_list_filters_updated_date_and_artifact_readiness(client: TestClient) -> None:
+    # Given: task records whose stage readiness and update times differ.
+    from app.db import session_scope
+    from app.models import Task, TaskStage
+
+    older = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    newer = older + timedelta(days=2)
+    with session_scope() as session:
+        _seed_task(session, task_id="task-failed", status="failed")
+        _seed_task(session, task_id="task-pending", status="pending")
+        failed = session.get(Task, "task-failed")
+        pending = session.get(Task, "task-pending")
+        assert failed is not None
+        assert pending is not None
+        failed.updated_at = older
+        pending.updated_at = newer
+        session.add_all(
+            [
+                TaskStage(task_id="task-failed", name="asr", status="failed"),
+                TaskStage(task_id="task-pending", name="ingest", status="pending"),
+            ]
+        )
+
+    # When: the server receives a URL-backed date range and readiness filter.
+    response = client.get(
+        "/api/v2/tasks",
+        params={"updated_from": older.isoformat(), "updated_to": newer.isoformat(), "readiness": "not_ready"},
+    )
+
+    # Then: filtering happens in the list endpoint before it returns the page.
+    assert response.status_code == 200
+    assert [item["task_id"] for item in response.json()["items"]] == ["task-pending"]
 
 
 def test_task_library_summary_and_missing_overview_are_exposed(client: TestClient) -> None:
@@ -160,6 +195,38 @@ def test_task_library_bulk_reports_per_task_archive_and_missing_results(client: 
             {"task_id": "task-missing", "status": "not_found", "message": "Task not found"},
         ]
     }
+
+
+def test_task_library_bulk_sets_tags_and_requeues_terminal_tasks(client: TestClient) -> None:
+    # Given: one completed task that can return to the queue and one active task that cannot.
+    from app.db import session_scope
+    from app.models import CANONICAL_STAGES, TaskStage
+
+    with session_scope() as session:
+        _seed_task(session, task_id="task-requeue", status="success")
+        _seed_task(session, task_id="task-active", status="running")
+        session.add_all(
+            [TaskStage(task_id="task-requeue", name=stage_name, status="success") for stage_name in CANONICAL_STAGES]
+        )
+
+    # When: tags are applied and both selected rows are requeued.
+    tag_response = client.post(
+        "/api/v2/tasks/bulk",
+        json={"operation": "set_tags", "task_ids": ["task-requeue"], "tags": ["featured", "review"]},
+    )
+    requeue_response = client.post(
+        "/api/v2/tasks/bulk",
+        json={"operation": "requeue", "task_ids": ["task-requeue", "task-active"]},
+    )
+
+    # Then: tags replace together and the batch reports independent requeue outcomes.
+    assert tag_response.status_code == 200
+    assert client.get("/api/v2/tasks/task-requeue").json()["tags"] == ["featured", "review"]
+    assert requeue_response.status_code == 200
+    assert requeue_response.json()["results"] == [
+        {"task_id": "task-requeue", "status": "success", "message": None},
+        {"task_id": "task-active", "status": "rejected", "message": "Task must be terminal before retry"},
+    ]
 
 
 def test_task_library_bulk_unarchives_and_rejects_active_deletion(client: TestClient) -> None:

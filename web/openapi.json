@@ -160,10 +160,28 @@
             "enum": [
               "archive",
               "unarchive",
-              "delete"
+              "delete",
+              "set_tags",
+              "requeue"
             ],
             "title": "Operation",
             "type": "string"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
           },
           "task_ids": {
             "items": {
@@ -2558,6 +2576,62 @@
           },
           {
             "in": "query",
+            "name": "updated_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "readiness",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ready",
+                    "missing",
+                    "failed",
+                    "not_ready"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Readiness"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort",
             "required": false,
             "schema": {
@@ -2689,7 +2763,7 @@
     },
     "/api/v2/tasks/bulk": {
       "post": {
-        "description": "Apply one archive, unarchive, or deletion operation per requested task.",
+        "description": "Apply one lifecycle, tag, or requeue operation per requested task.",
         "operationId": "bulk_task_mutation_endpoint_api_v2_tasks_bulk_post",
         "requestBody": {
           "content": {

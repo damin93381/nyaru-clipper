@@ -417,7 +417,7 @@ export interface paths {
         put?: never;
         /**
          * Bulk Task Mutation Endpoint
-         * @description Apply one archive, unarchive, or deletion operation per requested task.
+         * @description Apply one lifecycle, tag, or requeue operation per requested task.
          */
         post: operations["bulk_task_mutation_endpoint_api_v2_tasks_bulk_post"];
         delete?: never;
@@ -545,7 +545,9 @@ export interface components {
              * Operation
              * @enum {string}
              */
-            operation: "archive" | "unarchive" | "delete";
+            operation: "archive" | "unarchive" | "delete" | "set_tags" | "requeue";
+            /** Tags */
+            tags?: string[] | null;
             /** Task Ids */
             task_ids: string[];
         };
@@ -1771,6 +1773,9 @@ export interface operations {
                 statuses?: ("pending" | "running" | "success" | "failed" | "cancelled")[];
                 source_kind?: string | null;
                 tag?: string | null;
+                updated_from?: string | null;
+                updated_to?: string | null;
+                readiness?: ("ready" | "missing" | "failed" | "not_ready") | null;
                 sort?: "updated_at" | "created_at" | "title" | "storage_bytes";
                 direction?: "asc" | "desc";
                 page?: number;

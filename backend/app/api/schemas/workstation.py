@@ -36,6 +36,9 @@ class TaskListQuery(WorkstationSchema):
     statuses: list[TaskStatus] = Field(default_factory=list)
     source_kind: str | None = None
     tag: str | None = None
+    updated_from: datetime | None = None
+    updated_to: datetime | None = None
+    readiness: ArtifactReadinessStatus | None = None
     sort: TaskSort = "updated_at"
     direction: SortDirection = "desc"
     page: Annotated[int, Field(ge=1)] = 1

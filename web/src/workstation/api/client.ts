@@ -10,4 +10,5 @@ function normalizeApiOrigin(configuredBaseUrl: string): string {
 
 export const workstationClient = createClient<paths>({
   baseUrl: normalizeApiOrigin(import.meta.env.VITE_API_BASE_URL ?? defaultApiOrigin),
+  fetch: (...args) => globalThis.fetch(...args),
 });

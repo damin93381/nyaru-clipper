@@ -7,7 +7,7 @@ from typing import Annotated, Literal, TypeAlias
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import ConfigDict, Field, HttpUrl
+from pydantic import ConfigDict, Field, HttpUrl, model_validator
 from sqlmodel import Session
 
 from app.api.schemas.workstation import TaskLibrarySummary, TaskListPage, TaskListQuery, TaskOverview, WorkstationSchema
@@ -94,6 +94,14 @@ class BulkTaskMutationRequest(WorkstationSchema):
 
     operation: TaskBulkOperation
     task_ids: Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1)]
+    tags: list[Annotated[str, Field(min_length=1, max_length=80)]] | None = None
+
+    @model_validator(mode="after")
+    def require_tags_for_tag_mutation(self) -> "BulkTaskMutationRequest":
+        """Reject malformed tag requests at the HTTP boundary."""
+        if self.operation == "set_tags" and self.tags is None:
+            raise ValueError("tags is required when operation is set_tags")
+        return self
 
 
 class BulkTaskMutationResult(WorkstationSchema):
@@ -151,8 +159,13 @@ def bulk_task_mutation_endpoint(
     payload: BulkTaskMutationRequest,
     session: Session = Depends(get_session),
 ) -> BulkTaskMutationResponse:
-    """Apply one archive, unarchive, or deletion operation per requested task."""
-    results = [apply_task_bulk_mutation(session, task_id, payload.operation) for task_id in payload.task_ids]
+    """Apply one lifecycle, tag, or requeue operation per requested task."""
+    if payload.operation == "requeue":
+        begin_queue_mutation(session)
+    results = [
+        apply_task_bulk_mutation(session, task_id, payload.operation, tags=tuple(payload.tags) if payload.tags is not None else None)
+        for task_id in payload.task_ids
+    ]
     session.commit()
     return BulkTaskMutationResponse(
         results=[
