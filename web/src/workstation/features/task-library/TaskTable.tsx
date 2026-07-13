@@ -54,6 +54,7 @@ export function TaskTable(props: TaskTableProps): ReactNode {
           <input
             aria-label={`选择任务 ${row.original.title}`}
             checked={checked}
+            className="ny-task-table__selection-control"
             onChange={() => props.onSelectionChange(row.original.task_id, !checked)}
             onClick={(event) => event.stopPropagation()}
             type="checkbox"
@@ -116,7 +117,10 @@ export function TaskTable(props: TaskTableProps): ReactNode {
             <tr key={headerGroup.id}>
               {headerGroup.headers.map((header) => {
                 const sort = header.column.id;
-                return <th key={header.id} scope="col">
+                const ariaSort = isSortableColumn(sort) && props.filters.sort === sort
+                  ? (props.filters.direction === "asc" ? "ascending" : "descending")
+                  : undefined;
+                return <th aria-sort={ariaSort} key={header.id} scope="col">
                   {isSortableColumn(sort) ? (
                     <button className="ny-task-table__sort" onClick={() => props.onSort(sort)} type="button">
                       {flexRender(header.column.columnDef.header, header.getContext())}

@@ -41,6 +41,7 @@ export function TaskLibraryPage(): ReactNode {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseTaskLibraryFilters(searchParams), [searchParams]);
   const [searchInput, setSearchInput] = useState(filters.query);
+  const [tagInput, setTagInput] = useState(filters.tag ?? "");
   const [selectedTaskIds, setSelectedTaskIds] = useState<ReadonlySet<string>>(() => new Set());
   const [bulkOperation, setBulkOperation] = useState<BulkOperation | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -74,6 +75,7 @@ export function TaskLibraryPage(): ReactNode {
   }
 
   useEffect(() => setSearchInput(filters.query), [filters.query]);
+  useEffect(() => setTagInput(filters.tag ?? ""), [filters.tag]);
   useEffect(() => {
     if (searchInput === filters.query) return undefined;
     const timer = window.setTimeout(() => replaceFilters({ ...filters, query: searchInput.trim(), page: 1 }), 250);
@@ -83,6 +85,15 @@ export function TaskLibraryPage(): ReactNode {
   function toggleStatus(status: (typeof statusOptions)[number][0]): void {
     const statuses = filters.statuses.includes(status) ? filters.statuses.filter((item) => item !== status) : [...filters.statuses, status];
     replaceFilters({ ...filters, statuses, page: 1 });
+  }
+
+  function applyTagFilter(): void {
+    replaceFilters({ ...filters, tag: tagInput.trim() || null, page: 1 });
+  }
+
+  function clearTagFilter(): void {
+    setTagInput("");
+    replaceFilters({ ...filters, tag: null, page: 1 });
   }
 
   function selectTask(taskId: string, selected: boolean): void {
@@ -118,6 +129,13 @@ export function TaskLibraryPage(): ReactNode {
         <label className="ny-task-library__search" htmlFor="task-library-search"><Search aria-hidden="true" size="var(--ny-icon-default)" /><span className="ny-sr-only">搜索任务</span><input className="ny-input" id="task-library-search" onChange={(event) => setSearchInput(event.target.value)} placeholder="搜索标题、来源或任务 ID" role="searchbox" value={searchInput} /></label>
         <fieldset><legend>状态</legend>{statusOptions.map(([status, label]) => <label key={status}><input checked={filters.statuses.includes(status)} onChange={() => toggleStatus(status)} type="checkbox" />{label}</label>)}</fieldset>
         <label>来源<select className="ny-input" onChange={(event) => replaceFilters({ ...filters, sourceKind: sourceKindFromInput(event.target.value), page: 1 })} value={filters.sourceKind}><option value="all">全部</option><option value="bilibili">哔哩哔哩</option><option value="local">本地文件</option></select></label>
+        <div className="ny-task-library__tag-filter">
+          <label htmlFor="task-library-tag">标签<input className="ny-input" id="task-library-tag" onChange={(event) => setTagInput(event.target.value)} value={tagInput} /></label>
+          <div className="ny-task-library__tag-actions">
+            <button className="ny-button" onClick={applyTagFilter} type="button">应用标签</button>
+            <button className="ny-button ny-button--quiet" disabled={filters.tag === null && tagInput === ""} onClick={clearTagFilter} type="button">清除标签</button>
+          </div>
+        </div>
         <label>每页<select className="ny-input" onChange={(event) => replaceFilters({ ...filters, page: 1, pageSize: pageSizeFromInput(event.target.value) })} value={filters.pageSize}><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label>
       </div>
       <div className="ny-task-library__bulk" aria-label="批量任务操作">

@@ -94,6 +94,29 @@ describe("TaskLibraryPage", () => {
     await waitFor(() => expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("query")).toBe("夏日"));
   });
 
+  it("sets and clears the server-side tag filter while preserving URL query semantics", async () => {
+    const requestedUrls: URL[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      requestedUrls.push(url);
+      if (url.pathname.endsWith("/summary")) return jsonResponse({ active: 0, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 0 });
+      return jsonResponse({ items: [listItem], page: 1, page_count: 1, page_size: 50, total: 1 });
+    });
+
+    await renderTaskLibrary("/workstation?tag=%E5%A4%8F%E5%AD%A3");
+    const tag = await screen.findByRole("textbox", { name: "标签" });
+    expect(tag).toHaveValue("夏季");
+    expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("tag")).toBe("夏季");
+
+    fireEvent.click(screen.getByRole("button", { name: "清除标签" }));
+    await waitFor(() => expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("tag")).toBeNull());
+    expect(tag).toHaveValue("");
+
+    fireEvent.change(tag, { target: { value: "待复核" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用标签" }));
+    await waitFor(() => expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("tag")).toBe("待复核"));
+  });
+
   it("requests the next page from the server", async () => {
     const requestedUrls: URL[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
@@ -109,6 +132,26 @@ describe("TaskLibraryPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     await waitFor(() => expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("page")).toBe("2"));
     expect(await screen.findByRole("row", { name: new RegExp(taskTitle.slice(0, 24)) })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("announces the active sort direction from table headers", async () => {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (url.pathname.endsWith("/summary")) return jsonResponse({ active: 0, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 0 });
+      return jsonResponse({ items: [listItem], page: 1, page_count: 1, page_size: 50, total: 1 });
+    });
+
+    await renderTaskLibrary();
+    const titleHeader = await screen.findByRole("columnheader", { name: "任务" });
+    const updatedHeader = screen.getByRole("columnheader", { name: "更新" });
+    expect(titleHeader).not.toHaveAttribute("aria-sort");
+    expect(updatedHeader).toHaveAttribute("aria-sort", "descending");
+
+    fireEvent.click(screen.getByRole("button", { name: "任务" }));
+    await waitFor(() => expect(titleHeader).toHaveAttribute("aria-sort", "descending"));
+    expect(updatedHeader).not.toHaveAttribute("aria-sort");
+    fireEvent.click(screen.getByRole("button", { name: "任务" }));
+    await waitFor(() => expect(titleHeader).toHaveAttribute("aria-sort", "ascending"));
   });
 
   it("keeps failed bulk rows selected and announces the per-row result", async () => {

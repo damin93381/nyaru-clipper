@@ -220,6 +220,8 @@
 
 .ny-task-library__search .ny-input { min-width: 0; }
 .ny-task-library__filters select { min-width: 120px; }
+.ny-task-library__tag-filter { display: grid; gap: var(--ny-space-2); }
+.ny-task-library__tag-actions { display: flex; gap: var(--ny-space-2); }
 
 .ny-task-library__bulk {
   flex-wrap: wrap;
@@ -238,13 +240,16 @@
 }
 
 .ny-task-table__scroll { overflow-x: auto; border-top: 1px solid var(--ny-border); }
-.ny-task-table { min-width: 880px; }
+.ny-task-table { min-width: 960px; }
 .ny-task-table tr { cursor: pointer; }
+.ny-task-table th, .ny-task-table td { white-space: nowrap; }
 .ny-task-table__title { display: block; max-width: 34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ny-task-table__sort { display: inline-flex; gap: var(--ny-space-1); align-items: center; padding: 0; border: 0; color: inherit; cursor: pointer; background: transparent; font: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: inherit; }
+.ny-task-table__selection-control { inline-size: var(--ny-target-min); block-size: var(--ny-target-min); margin: 0; accent-color: var(--ny-accent); }
+.ny-task-table__sort { display: inline-flex; gap: var(--ny-space-1); align-items: center; justify-content: center; min-inline-size: var(--ny-target-min); min-block-size: var(--ny-target-min); padding: var(--ny-space-2); border: 0; color: inherit; cursor: pointer; background: transparent; font: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: inherit; }
 .ny-task-table__hint { margin: var(--ny-space-3) 0; color: var(--ny-ink-muted); font-size: var(--ny-font-caption); }
 
 .ny-task-inspector { display: grid; gap: var(--ny-space-4); }
+.ny-task-inspector__heading { min-width: 0; overflow: hidden; font-size: var(--ny-font-section); text-overflow: ellipsis; white-space: nowrap; }
 .ny-task-inspector__facts { display: grid; gap: var(--ny-space-2); margin: 0; padding: var(--ny-space-4) 0; border-top: 1px solid var(--ny-border); border-bottom: 1px solid var(--ny-border); }
 .ny-task-inspector__facts div { display: flex; justify-content: space-between; gap: var(--ny-space-2); }
 .ny-task-inspector__facts dt { color: var(--ny-ink-muted); }
