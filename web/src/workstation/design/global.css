@@ -1,0 +1,41 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--ny-canvas);
+  color: var(--ny-ink);
+  font-family: var(--ny-font-sans);
+}
+
+body {
+  margin: 0;
+  min-width: 1280px;
+  min-height: 100dvh;
+  background-color: var(--ny-canvas);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--ny-border) 20%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--ny-border) 20%, transparent) 1px, transparent 1px);
+  background-size: var(--ny-space-4) var(--ny-space-4);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+[data-radix-popper-content-wrapper] [role="menuitem"]:focus-visible {
+  outline: none;
+  box-shadow: var(--ny-focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+  }
+}

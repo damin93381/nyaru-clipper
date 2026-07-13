@@ -1,0 +1,45 @@
+:root {
+  --ny-canvas: #eee9de;
+  --ny-surface: #fdfaf3;
+  --ny-surface-muted: #f3eee4;
+  --ny-ink: #211f1a;
+  --ny-ink-muted: #756d60;
+  --ny-border: #c9c0b0;
+  --ny-accent: #a43c2e;
+  --ny-success: #3e6755;
+  --ny-warning: #a77322;
+  --ny-danger: #8f2f2f;
+  --ny-focus: #315f8a;
+
+  --ny-radius-1: 2px;
+  --ny-radius-2: 4px;
+  --ny-motion-fast: 140ms;
+  --ny-motion-base: 200ms;
+
+  --ny-space-1: 4px;
+  --ny-space-2: 8px;
+  --ny-space-3: 12px;
+  --ny-space-4: 16px;
+  --ny-space-5: 20px;
+  --ny-space-6: 24px;
+  --ny-space-8: 32px;
+  --ny-space-10: 40px;
+  --ny-space-12: 48px;
+  --ny-target-min: 44px;
+
+  --ny-font-serif: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, serif;
+  --ny-font-sans: Inter, "Noto Sans CJK SC", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --ny-font-mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", monospace;
+  --ny-font-caption: 12px;
+  --ny-font-body: 14px;
+  --ny-font-body-lg: 16px;
+  --ny-font-section: 20px;
+  --ny-font-page: 28px;
+  --ny-line-tight: 1.2;
+  --ny-line-body: 1.5;
+  --ny-icon-default: 16px;
+  --ny-icon-stroke: 1.5;
+
+  --ny-shadow-overlay: 2px 3px 0 color-mix(in srgb, var(--ny-border) 56%, transparent);
+  --ny-focus-ring: 0 0 0 3px color-mix(in srgb, var(--ny-focus) 32%, transparent);
+}
