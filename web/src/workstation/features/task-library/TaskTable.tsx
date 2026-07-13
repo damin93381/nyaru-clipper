@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import type { TaskListItem } from "./api";
 import type { TaskLibraryFilters } from "./filters";
+import { getStageLabel } from "../../../lib/copy/glossary";
 
 interface TaskTableProps {
   readonly filters: TaskLibraryFilters;
@@ -51,14 +52,19 @@ export function TaskTable(props: TaskTableProps): ReactNode {
       cell: ({ row }) => {
         const checked = props.selectedTaskIds.has(row.original.task_id);
         return (
-          <input
-            aria-label={`选择任务 ${row.original.title}`}
-            checked={checked}
-            className="ny-task-table__selection-control"
-            onChange={() => props.onSelectionChange(row.original.task_id, !checked)}
+          <label
+            className="ny-task-table__selection-target"
+            data-testid={`task-selection-target-${row.original.task_id}`}
             onClick={(event) => event.stopPropagation()}
-            type="checkbox"
-          />
+          >
+            <input
+              aria-label={`选择任务 ${row.original.title}`}
+              checked={checked}
+              className="ny-task-table__selection-control"
+              onChange={() => props.onSelectionChange(row.original.task_id, !checked)}
+              type="checkbox"
+            />
+          </label>
         );
       },
     },
@@ -75,9 +81,28 @@ export function TaskTable(props: TaskTableProps): ReactNode {
       cell: ({ row }) => <span className={`ny-stamp ${taskStatusClass(row.original.status)}`}>{taskStatusLabel(row.original.status)}</span>,
     },
     {
+      accessorKey: "tags",
+      header: "标签",
+      cell: ({ row }) => row.original.tags.length > 0 ? (
+        <span className="ny-task-table__tags" title={row.original.tags.join("，")}>
+          {row.original.tags.map((tag) => <span className="ny-task-table__tag" key={tag}>{tag}</span>)}
+        </span>
+      ) : <span className="ny-task-table__tags ny-task-table__tags--empty">无标签</span>,
+    },
+    {
       accessorKey: "source_label",
       header: "来源",
       cell: ({ row }) => <span>{row.original.source_label}</span>,
+    },
+    {
+      accessorKey: "current_stage",
+      header: "当前阶段",
+      cell: ({ row }) => <span className="ny-task-table__stage" title={row.original.current_stage ?? "等待分配"}>{row.original.current_stage ? getStageLabel(row.original.current_stage) : "等待分配"}</span>,
+    },
+    {
+      accessorKey: "progress_percent",
+      header: "进度",
+      cell: ({ row }) => <data className="ny-table__technical" value={row.original.progress_percent}>{row.original.progress_percent}%</data>,
     },
     {
       accessorKey: "updated_at",

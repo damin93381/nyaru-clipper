@@ -31,8 +31,19 @@ function pageSizeFromInput(value: string): 25 | 50 | 100 {
   return 50;
 }
 
-function summaryItems(summary: { readonly active: number; readonly queued: number; readonly failed: number; readonly review_required: number }): readonly string[] {
-  return [`运行中 ${summary.active}`, `队列中 ${summary.queued}`, `失败 ${summary.failed}`, `待复核 ${summary.review_required}`];
+function formatStorage(bytes: number): string {
+  return `${(bytes / 1_024).toFixed(bytes >= 1_024 ? 1 : 0)} KB`;
+}
+
+function summaryItems(summary: { readonly active: number; readonly archived: number; readonly queued: number; readonly failed: number; readonly review_required: number; readonly storage_bytes: number }): readonly string[] {
+  return [
+    `运行中 ${summary.active}`,
+    `队列中 ${summary.queued}`,
+    `失败 ${summary.failed}`,
+    `待复核 ${summary.review_required}`,
+    `已归档 ${summary.archived}`,
+    `存储 ${formatStorage(summary.storage_bytes)}`,
+  ];
 }
 
 export function TaskLibraryPage(): ReactNode {

@@ -66,9 +66,17 @@ describe("TaskLibraryPage", () => {
     await renderTaskLibrary("/workstation?status=running&source=bilibili&tag=%E5%A4%8F%E5%AD%A3");
 
     expect(await screen.findByText("运行中 1")).toBeVisible();
+    expect(screen.getByText("已归档 2")).toBeVisible();
+    expect(screen.getByText("存储 6.0 KB")).toBeVisible();
     expect(taskTitle.length).toBeGreaterThan(120);
     expect(screen.getByTitle(taskTitle)).toBeVisible();
     expect(screen.getByRole("row", { name: new RegExp(taskTitle.slice(0, 24)) })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "标签" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "当前阶段" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "进度" })).toBeVisible();
+    expect(screen.getByText("夏季")).toBeVisible();
+    expect(screen.getByText("翻译")).toBeVisible();
+    expect(screen.getByText("58%")).toBeVisible();
     await waitFor(() => expect(requestedUrls.some((url) => url.pathname.endsWith("/api/v2/tasks"))).toBe(true));
     const taskRequest = requestedUrls.find((url) => url.pathname.endsWith("/api/v2/tasks"));
     expect(taskRequest?.searchParams.getAll("statuses")).toEqual(["running"]);

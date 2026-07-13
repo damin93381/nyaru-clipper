@@ -15,7 +15,7 @@ const listItem = {
   updated_at: "2026-07-11T03:00:00Z",
 } as const;
 
-test("keeps task selection and sorting controls at the 44px target with correct aria-sort", async ({ page }) => {
+test("keeps the task-selection hit target large while rendering a compact paper-surface checkbox", async ({ page }) => {
   await page.route("**/api/v2/tasks/summary", async (route) => {
     await route.fulfill({ json: { active: 1, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 4_096 } });
   });
@@ -26,16 +26,27 @@ test("keeps task selection and sorting controls at the 44px target with correct 
   await page.goto("/workstation");
 
   const selection = page.getByRole("checkbox", { name: "选择任务 夏日档案直播回放" });
+  const selectionTarget = page.getByTestId("task-selection-target-task-42");
   const titleSort = page.getByRole("button", { exact: true, name: "任务" });
   await expect(selection).toBeVisible();
   await expect(titleSort).toBeVisible();
 
   const selectionBox = await selection.boundingBox();
+  const selectionTargetBox = await selectionTarget.boundingBox();
   const titleSortBox = await titleSort.boundingBox();
-  expect(selectionBox?.width).toBeGreaterThanOrEqual(44);
-  expect(selectionBox?.height).toBeGreaterThanOrEqual(44);
+  expect(selectionTargetBox?.width).toBeGreaterThanOrEqual(44);
+  expect(selectionTargetBox?.height).toBeGreaterThanOrEqual(44);
+  expect(selectionBox?.width).toBeGreaterThanOrEqual(16);
+  expect(selectionBox?.width).toBeLessThanOrEqual(20);
+  expect(selectionBox?.height).toBeGreaterThanOrEqual(16);
+  expect(selectionBox?.height).toBeLessThanOrEqual(20);
   expect(titleSortBox?.width).toBeGreaterThanOrEqual(44);
   expect(titleSortBox?.height).toBeGreaterThanOrEqual(44);
+  await expect(selection).toHaveCSS("appearance", "none");
+  await expect(selection).toHaveCSS("border-top-width", "1px");
+  await expect(selection).toHaveCSS("background-color", "rgb(253, 250, 243)");
+  await selection.click();
+  await expect(selection).toHaveCSS("background-color", "rgb(164, 60, 46)");
 
   await expect(page.getByRole("columnheader", { exact: true, name: "更新" })).toHaveAttribute("aria-sort", "descending");
   await expect(page.getByRole("columnheader", { exact: true, name: "任务" })).not.toHaveAttribute("aria-sort");
