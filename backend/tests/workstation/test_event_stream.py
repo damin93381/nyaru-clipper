@@ -159,6 +159,18 @@ def test_events_endpoint_declares_sse_response() -> None:
     assert response.headers["x-accel-buffering"] == "no"
 
 
+def test_events_openapi_declares_the_sse_media_type() -> None:
+    from app.main import app
+
+    # Given: the generated public OpenAPI contract.
+    schema = app.openapi()
+
+    # Then: clients discover an event stream rather than an inaccurate JSON response.
+    response = schema["paths"]["/api/v2/events"]["get"]["responses"]["200"]
+    assert "text/event-stream" in response["content"]
+    assert "application/json" not in response["content"]
+
+
 def test_events_endpoint_uses_query_cursor_when_header_is_absent(monkeypatch) -> None:
     from app.api.routes import workstation_events
 

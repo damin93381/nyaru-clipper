@@ -2,6 +2,7 @@ const defaultApiOrigin = "http://127.0.0.1:8000";
 
 export const workstationEventNames = [
   "task.created",
+  "task.deleted",
   "task.updated",
   "stage.updated",
   "artifact.ready",

@@ -1,10 +1,10 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { DndContext, KeyboardCode, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, MoreHorizontal } from "lucide-react";
-import type { DragEndEvent } from "@dnd-kit/core";
-import type { ReactNode } from "react";
+import type { DragEndEvent, KeyboardCoordinateGetter, KeyboardSensorOptions, SensorInstance, SensorProps } from "@dnd-kit/core";
+import { useMemo, type ReactNode } from "react";
 
 import type { QueueItem, QueueSnapshot, QueueState } from "./api";
 
@@ -31,6 +31,101 @@ interface QueueRowProps {
 }
 
 type QueueInsertion = "after" | "before";
+
+const queueKeyboardCodes = {
+  cancel: [KeyboardCode.Esc],
+  end: [KeyboardCode.Space, KeyboardCode.Enter, KeyboardCode.Tab],
+  start: [KeyboardCode.Space, KeyboardCode.Enter],
+};
+
+class QueueKeyboardSensor implements SensorInstance {
+  static activators = KeyboardSensor.activators;
+
+  autoScrollEnabled = false;
+
+  private readonly document: Document;
+  private readonly props: SensorProps<KeyboardSensorOptions>;
+  private readonly window: Window;
+  private keyboardListenerAttached = false;
+  private keyboardListenerTimer: ReturnType<typeof setTimeout> | null = null;
+  private referenceCoordinates: { x: number; y: number } | null = null;
+
+  constructor(props: SensorProps<KeyboardSensorOptions>) {
+    this.props = props;
+    this.document = props.event.target instanceof Node ? props.event.target.ownerDocument ?? window.document : window.document;
+    this.window = this.document.defaultView ?? window;
+    this.handleKeyDown = this.handleKeyDown.bind(this);
+    this.handleCancel = this.handleCancel.bind(this);
+
+    const activeNode = props.activeNode.node.current;
+    if (activeNode !== null && typeof activeNode.scrollIntoView === "function") activeNode.scrollIntoView({ block: "nearest", inline: "nearest" });
+    props.onStart({ x: 0, y: 0 });
+    this.window.addEventListener("resize", this.handleCancel);
+    this.window.addEventListener("visibilitychange", this.handleCancel);
+    this.keyboardListenerTimer = setTimeout(() => {
+      this.document.addEventListener("keydown", this.handleKeyDown);
+      this.keyboardListenerAttached = true;
+    });
+  }
+
+  private detach(): void {
+    if (this.keyboardListenerTimer !== null) clearTimeout(this.keyboardListenerTimer);
+    if (this.keyboardListenerAttached) this.document.removeEventListener("keydown", this.handleKeyDown);
+    this.window.removeEventListener("resize", this.handleCancel);
+    this.window.removeEventListener("visibilitychange", this.handleCancel);
+  }
+
+  private handleCancel(event: Event): void {
+    event.preventDefault();
+    this.detach();
+    this.props.onCancel();
+  }
+
+  private handleKeyDown(event: KeyboardEvent): void {
+    const { keyboardCodes = queueKeyboardCodes, coordinateGetter } = this.props.options;
+    if (keyboardCodes.end.includes(event.code)) {
+      event.preventDefault();
+      this.detach();
+      this.props.onEnd();
+      return;
+    }
+    if (keyboardCodes.cancel.includes(event.code)) {
+      this.handleCancel(event);
+      return;
+    }
+    if (coordinateGetter === undefined) return;
+
+    const collisionRect = this.props.context.current.collisionRect;
+    const currentCoordinates = collisionRect === null ? { x: 0, y: 0 } : { x: collisionRect.left, y: collisionRect.top };
+    this.referenceCoordinates ??= currentCoordinates;
+    const nextCoordinates = coordinateGetter(event, {
+      active: this.props.active,
+      context: this.props.context.current,
+      currentCoordinates,
+    });
+    if (nextCoordinates === undefined) return;
+
+    event.preventDefault();
+    this.props.onMove({
+      x: nextCoordinates.x - this.referenceCoordinates.x,
+      y: nextCoordinates.y - this.referenceCoordinates.y,
+    });
+  }
+}
+
+function queueKeyboardCoordinates(queuedTaskIds: readonly string[]): KeyboardCoordinateGetter {
+  return (event, args) => {
+    if (event.code !== KeyboardCode.Down && event.code !== KeyboardCode.Up) return undefined;
+
+    event.preventDefault();
+    const currentIndex = queuedTaskIds.indexOf(String(args.active));
+    const targetIndex = event.code === KeyboardCode.Down ? currentIndex + 1 : currentIndex - 1;
+    const targetTaskId = queuedTaskIds[targetIndex];
+    const targetRect = targetTaskId === undefined ? undefined : args.context.droppableRects.get(targetTaskId);
+
+    return targetRect === undefined ? undefined : { x: targetRect.left, y: targetRect.top };
+  };
+}
 
 interface QueueActionsProps {
   readonly canMoveDown: boolean;
@@ -64,7 +159,7 @@ function QueueActions({ canMoveDown, canMoveUp, isMutating, item, onMove, onSetS
 }
 
 function QueueRow({ canMoveDown, canMoveUp, isMutating, item, onMove, onSelect, onSetState, queuedTaskIds, selected, sortable }: QueueRowProps): ReactNode {
-  const { active, attributes, isDragging, isOver, listeners, setNodeRef, transform, transition } = useSortable({ disabled: !sortable || isMutating, id: item.task_id });
+  const { active, attributes, isDragging, isOver, listeners, setActivatorNodeRef, setNodeRef, transform, transition } = useSortable({ disabled: !sortable || isMutating, id: item.task_id });
   const style = sortable ? { transform: CSS.Transform.toString(transform), transition } : undefined;
   const activeTaskId = active === null ? null : String(active.id);
   const insertion = isOver && activeTaskId !== null && activeTaskId !== item.task_id
@@ -76,7 +171,7 @@ function QueueRow({ canMoveDown, canMoveUp, isMutating, item, onMove, onSelect, 
       if (event.target instanceof HTMLElement && event.target.closest("button, [role=menuitem]")) return;
       onSelect(item.task_id);
     }} ref={setNodeRef} style={style}>
-      <td><button aria-label={`拖动 ${item.task_id}`} className="ny-button ny-button--quiet" disabled={!sortable || isMutating} type="button" {...attributes} {...listeners}><GripVertical aria-hidden="true" size="var(--ny-icon-default)" /></button></td>
+      <td><button aria-label={`拖动 ${item.task_id}`} className="ny-button ny-button--quiet" disabled={!sortable || isMutating} ref={setActivatorNodeRef} type="button" {...attributes} {...listeners}><GripVertical aria-hidden="true" size="var(--ny-icon-default)" /></button></td>
       <td className="ny-table__technical"><button aria-label={`选择 ${item.task_id}`} aria-pressed={selected} className="ny-queue__selection-action" onClick={() => onSelect(item.task_id)} type="button">{item.task_id}</button></td>
       <td>{item.state === "running" ? "正在执行" : item.state === "paused" ? "已暂停" : "等待处理"}</td>
       <td>{item.state === "queued" ? item.position : "—"}</td>
@@ -87,8 +182,9 @@ function QueueRow({ canMoveDown, canMoveUp, isMutating, item, onMove, onSelect, 
 }
 
 export function QueueList({ isMutating, onReorder, onSelect, onSetState, selectedTaskId, snapshot }: QueueListProps): ReactNode {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const queuedTaskIds = snapshot.queued.map((item) => item.task_id);
+  const keyboardCoordinates = useMemo(() => queueKeyboardCoordinates(queuedTaskIds), [queuedTaskIds]);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(QueueKeyboardSensor, { coordinateGetter: keyboardCoordinates }));
 
   function move(taskId: string, direction: "down" | "first" | "up"): void {
     if (isMutating) return;

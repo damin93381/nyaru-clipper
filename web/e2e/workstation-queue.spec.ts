@@ -72,6 +72,41 @@ test("reorders only queued work with a real Chrome pointer drag", async ({ page 
   await expect.poll(async () => (await page.locator("section[aria-labelledby='queue-list-title'] table").nth(1).locator("tbody tr").allTextContents()).map((text) => text.match(/task-\w+/)?.[0])).toEqual(["task-second", "task-first", "task-third"]);
 });
 
+test("reorders queued work with the real Chrome keyboard drag interaction", async ({ page }) => {
+  let reorderBody: unknown;
+  let latestQueueSnapshot = queueSnapshot;
+  await page.route("**/api/v2/queue**", async (route) => {
+    if (route.request().method() === "PUT") {
+      reorderBody = route.request().postDataJSON();
+      latestQueueSnapshot = {
+        ...queueSnapshot,
+        queued: [
+          { ...queueSnapshot.queued[1], position: 1 },
+          { ...queueSnapshot.queued[0], position: 2 },
+          queueSnapshot.queued[2],
+        ],
+        revision: 8,
+      };
+      await route.fulfill({ json: latestQueueSnapshot });
+      return;
+    }
+    await route.fulfill({ json: latestQueueSnapshot });
+  });
+
+  await page.setViewportSize({ height: 800, width: 1280 });
+  await page.goto("/workstation/queue");
+  const firstHandle = page.getByRole("button", { name: "拖动 task-first" });
+  await firstHandle.focus();
+  await firstHandle.press("Space");
+  await expect(firstHandle).toHaveAttribute("aria-pressed", "true");
+  await firstHandle.press("ArrowDown");
+  await expect(page.getByRole("row", { name: /task-second/ })).toHaveAttribute("data-queue-insertion", "after");
+  await firstHandle.press("Space");
+
+  await expect.poll(() => reorderBody).toEqual({ expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] });
+  await expect(page.getByText("队列版本 8")).toBeVisible();
+});
+
 test("shows queue inspection, drag affordances, and disabled menu states in production Chrome", async ({ page }) => {
   await page.route("**/api/v2/queue**", async (route) => route.fulfill({ json: queueSnapshot }));
 

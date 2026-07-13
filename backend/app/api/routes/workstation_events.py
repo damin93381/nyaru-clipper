@@ -12,7 +12,16 @@ from app.services.workstation_events import iter_events
 router = APIRouter(prefix="/v2/events", tags=["workstation-events"])
 
 
-@router.get("")
+@router.get(
+    "",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "A replayable server-sent event stream.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
+)
 async def workstation_events_endpoint(
     last_event_id: Annotated[int | None, Header(alias="Last-Event-ID", ge=0)] = None,
     cursor: Annotated[int | None, Query(ge=0)] = None,

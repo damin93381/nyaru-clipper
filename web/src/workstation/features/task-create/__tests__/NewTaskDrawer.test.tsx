@@ -258,7 +258,6 @@ describe("NewTaskDrawer", () => {
     "https://bilibili.com/video/BV1root",
     "https://www.bilibili.com/video/BV1www",
     "https://m.bilibili.com/video/BV1mobile",
-    "https://b23.tv/BV1short",
   ])("accepts the supported Bilibili host %s", async (sourceUrl) => {
     const inspectUrls: string[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -282,7 +281,11 @@ describe("NewTaskDrawer", () => {
     expect(inspectUrls).toEqual([sourceUrl]);
   });
 
-  it("rejects an unrelated HTTPS source before calling the Bilibili inspect endpoint", async () => {
+  it.each([
+    "https://b23.tv/BV1short",
+    "http://www.bilibili.com/video/BV1insecure",
+    "https://example.com/video/BV1unrelated",
+  ])("rejects %s before calling the Bilibili inspect endpoint", async (sourceUrl) => {
     const inspect = vi.fn();
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const next = await request(input, init);
@@ -292,7 +295,7 @@ describe("NewTaskDrawer", () => {
     renderDrawer();
 
     fireEvent.click(screen.getByRole("button", { name: "Bilibili 录播" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Bilibili 链接" }), { target: { value: "https://example.com/video/BV1unrelated" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Bilibili 链接" }), { target: { value: sourceUrl } });
     fireEvent.click(screen.getByRole("button", { name: "检查来源" }));
 
     expect(await screen.findByText("请输入有效的 Bilibili 链接。")).toBeVisible();

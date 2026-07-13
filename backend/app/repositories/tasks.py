@@ -49,8 +49,10 @@ def normalize_source_url(source_url: str) -> tuple[str, str | None]:
 
 
 def normalize_bilibili_source_url(source_url: str) -> tuple[str, str]:
-    """Normalize only the supported Bilibili long and BV-bearing short URL forms."""
+    """Normalize only HTTPS Bilibili long-form BV URLs without resolving short links."""
     parsed = urlparse(source_url)
+    if parsed.scheme.casefold() != "https":
+        raise ValueError("Unsupported Bilibili source URL")
     hostname = parsed.hostname.casefold() if parsed.hostname else ""
     path_parts = [part for part in parsed.path.split("/") if part]
     video_id = _bilibili_video_id(hostname, path_parts)
@@ -60,15 +62,11 @@ def normalize_bilibili_source_url(source_url: str) -> tuple[str, str]:
 
 
 def _bilibili_video_id(hostname: str, path_parts: list[str]) -> str | None:
-    """Extract a BV identifier only from supported Bilibili URL path shapes."""
+    """Extract a BV identifier only from the approved Bilibili long-form path shape."""
     if hostname == "bilibili.com" or hostname.endswith(".bilibili.com"):
         if len(path_parts) < 2 or path_parts[0].casefold() != "video":
             return None
         candidate = path_parts[1]
-    elif hostname == "b23.tv":
-        if not path_parts:
-            return None
-        candidate = path_parts[0]
     else:
         return None
     return candidate if _BV_PATH_COMPONENT_PATTERN.fullmatch(candidate) else None

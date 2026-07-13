@@ -10,7 +10,7 @@ This MVP runs one GPU-bound pipeline job at a time. It does not record live stre
 
 Select **New task** in the command bar. The drawer always validates the source before a task is created.
 
-- **Bilibili VOD**: paste an HTTPS Bilibili or b23.tv URL, select **Inspect source**, confirm the title/uploader preview, then choose Standard and a priority.
+- **Bilibili VOD**: paste an HTTPS `bilibili.com` URL (including an approved subdomain) with a `/video/BV…` path, select **Inspect source**, confirm the title/uploader preview, then choose Standard and a priority. Short links and HTTP URLs are deliberately rejected and never resolved by the workstation.
 - **Local file**: browse only the operator-configured import roots. Select a supported media file and choose either **Reference original file** or **Copy into task storage**. The browser receives an opaque root ID and a relative catalog path; it never receives the host path.
 
 Creating the task puts it in the ordered single-GPU queue and opens `/workstation/tasks/<task_id>`.

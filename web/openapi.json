@@ -2240,11 +2240,13 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "A replayable server-sent event stream."
           },
           "422": {
             "content": {
@@ -2331,6 +2333,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueSnapshotResponse"
+                }
+              }
+            },
+            "description": "The supplied queue revision is stale; the response body is the authoritative snapshot."
           },
           "422": {
             "content": {

@@ -79,7 +79,7 @@ export function TaskOverviewPage({ taskId }: TaskOverviewPageProps): ReactNode {
       <header className="ny-task-overview__header">
         <div>
           <p className="ny-workstation__eyebrow">任务概览</p>
-          <h1 className="ny-workstation-page__title" id="task-overview-title">{task.title}</h1>
+          <h1 className="ny-task-overview__title ny-workstation-page__title" id="task-overview-title">{task.title}</h1>
           <p className="ny-workstation-page__copy">{task.source_label}</p>
         </div>
         <p className={`ny-stamp ny-stamp--${status.tone}`}><StatusIcon tone={status.tone} />{status.label}</p>

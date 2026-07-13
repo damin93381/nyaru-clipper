@@ -374,3 +374,45 @@ def test_task_library_bulk_delete_removes_all_task_owned_database_rows(client: T
         assert queue_state.revision == 2
         assert retained_entry is not None
         assert retained_entry.position == 1
+
+
+def test_bulk_delete_reloads_running_task_after_acquiring_the_queue_lock(client: TestClient, monkeypatch) -> None:
+    from app.db import session_scope
+    from app.models import QueueEntry, Task
+    from app.services import task_library_lifecycle
+    from app.services.workstation_queue import begin_queue_mutation as real_begin_queue_mutation
+
+    # Given: the deleter has a pending task snapshot while the worker is about to claim it.
+    with session_scope() as session:
+        _seed_task(session, task_id="task-claimed-during-delete")
+        session.add(QueueEntry(task_id="task-claimed-during-delete", position=1, state="queued"))
+
+    def worker_claims_before_delete_lock(session: Session) -> None:
+        with session_scope() as worker_session:
+            task = worker_session.get(Task, "task-claimed-during-delete")
+            entry = worker_session.get(QueueEntry, "task-claimed-during-delete")
+            assert task is not None
+            assert entry is not None
+            task.status = "running"
+            entry.state = "running"
+            worker_session.add_all([task, entry])
+        real_begin_queue_mutation(session)
+
+    monkeypatch.setattr(task_library_lifecycle, "begin_queue_mutation", worker_claims_before_delete_lock, raising=False)
+
+    # When: deletion enters the queue-critical section after the worker's claim.
+    response = client.post(
+        "/api/v2/tasks/bulk",
+        json={"operation": "delete", "task_ids": ["task-claimed-during-delete"]},
+    )
+
+    # Then: it reloads the authoritative status and never deletes active GPU work.
+    assert response.status_code == 200
+    assert response.json()["results"] == [
+        {"task_id": "task-claimed-during-delete", "status": "rejected", "message": "Task is actively running"}
+    ]
+    with session_scope() as session:
+        assert session.get(Task, "task-claimed-during-delete") is not None
+        running_entry = session.get(QueueEntry, "task-claimed-during-delete")
+        assert running_entry is not None
+        assert running_entry.state == "running"

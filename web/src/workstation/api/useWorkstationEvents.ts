@@ -33,7 +33,7 @@ function parseEventPayload(data: string): EventPayload {
 }
 
 function isTaskProjectionEvent(eventName: string): boolean {
-  return eventName === "task.created" || eventName === "task.updated" || eventName === "stage.updated" || eventName === "artifact.ready";
+  return eventName === "task.created" || eventName === "task.deleted" || eventName === "task.updated" || eventName === "stage.updated" || eventName === "artifact.ready";
 }
 
 export function useWorkstationEvents(): WorkstationEventConnection {

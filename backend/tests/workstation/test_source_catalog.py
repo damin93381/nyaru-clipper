@@ -76,7 +76,7 @@ def test_local_catalog_rejects_paths_outside_trusted_root(client: TestClient, re
     ("url", "source_video_id"),
     [
         ("https://www.bilibili.com/video/BV1abc/?from=search", "BV1abc"),
-        ("https://b23.tv/BV1short", "BV1short"),
+        ("https://m.bilibili.com/video/BV1mobile", "BV1mobile"),
     ],
 )
 def test_bilibili_inspection_normalizes_supported_urls_without_live_network(
@@ -108,8 +108,9 @@ def test_bilibili_inspection_normalizes_supported_urls_without_live_network(
     }
 
 
-def test_bilibili_inspection_rejects_bv_identifier_on_an_untrusted_host(client: TestClient, monkeypatch) -> None:
-    # Given: a non-Bilibili URL whose path contains a BV-shaped identifier.
+@pytest.mark.parametrize("url", ["https://b23.tv/BV1short", "http://www.bilibili.com/video/BV1insecure", "https://example.invalid/BV1abc"])
+def test_bilibili_inspection_rejects_untrusted_or_insecure_bv_urls(client: TestClient, monkeypatch, url: str) -> None:
+    # Given: a short-link, insecure Bilibili URL, or non-Bilibili URL whose path contains a BV-shaped identifier.
     monkeypatch.setattr(
         "app.services.source_catalog.run_bilibili_inspection_command",
         lambda command: (_ for _ in ()).throw(AssertionError("untrusted hosts must not invoke yt-dlp")),
@@ -118,7 +119,7 @@ def test_bilibili_inspection_rejects_bv_identifier_on_an_untrusted_host(client: 
     # When: source inspection receives the hostile URL.
     response = client.post(
         "/api/v2/sources/bilibili/inspect",
-        json={"url": "https://example.invalid/BV1abc"},
+        json={"url": url},
     )
 
     # Then: the URL is rejected before metadata inspection.

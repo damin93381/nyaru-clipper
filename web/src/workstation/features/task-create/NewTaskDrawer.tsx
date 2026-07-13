@@ -109,12 +109,12 @@ function isBilibiliUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
     const hostname = parsed.hostname.toLowerCase();
-    return (
-      parsed.protocol === "https:" &&
-      (hostname === "bilibili.com" ||
-        hostname.endsWith(".bilibili.com") ||
-        hostname === "b23.tv")
-    );
+    const pathParts = parsed.pathname.split("/").filter((part) => part.length > 0);
+    return parsed.protocol === "https:"
+      && (hostname === "bilibili.com" || hostname.endsWith(".bilibili.com"))
+      && pathParts.length >= 2
+      && pathParts[0]?.toLowerCase() === "video"
+      && /^BV[0-9A-Za-z]+$/i.test(pathParts[1] ?? "");
   } catch {
     return false;
   }

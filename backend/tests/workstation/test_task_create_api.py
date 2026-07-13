@@ -347,3 +347,26 @@ def test_v2_task_creation_rejects_bv_identifier_on_an_untrusted_host(client: Tes
     # Then: creation rejects it instead of normalizing the attacker-controlled host into Bilibili.
     assert response.status_code == 400
     assert response.json()["detail"] == "Unsupported Bilibili source URL"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://b23.tv/BV1short",
+        "http://www.bilibili.com/video/BV1insecure",
+    ],
+)
+def test_v2_task_creation_rejects_short_link_and_insecure_bilibili_urls(client: TestClient, url: str) -> None:
+    # Given: a URL which must not reach the downloader boundary without the approved HTTPS long-form shape.
+    payload = {
+        "source": {"kind": "bilibili", "url": url},
+        "profile_id": "standard",
+        "priority": 0,
+    }
+
+    # When: it crosses the v2 creation boundary.
+    response = client.post("/api/v2/tasks", json=payload)
+
+    # Then: the task is rejected before a durable record can be created.
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported Bilibili source URL"

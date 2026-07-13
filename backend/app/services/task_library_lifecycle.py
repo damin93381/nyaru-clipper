@@ -14,6 +14,7 @@ from app.models import (
     ClipCandidate,
     MediaSource,
     PipelineRun,
+    QueueEntry,
     StageRun,
     Task,
     TaskExecutionControl,
@@ -25,6 +26,7 @@ from app.models import (
     utc_now,
 )
 from app.services.workstation_events import publish_event, publish_task_updated
+from app.services.workstation_queue import begin_queue_mutation
 
 
 TaskBulkOperation: TypeAlias = Literal["archive", "unarchive", "delete", "set_tags", "requeue"]
@@ -82,6 +84,9 @@ def apply_task_bulk_mutation(
     tags: tuple[str, ...] | None = None,
 ) -> TaskBulkMutationOutcome:
     """Apply one operation without committing, preserving independent batch outcomes."""
+    if operation == "delete":
+        begin_queue_mutation(session)
+        session.expire_all()
     task = session.get(Task, task_id)
     if task is None:
         return TaskBulkMutationOutcome(task_id=task_id, status="not_found", message="Task not found")
@@ -105,7 +110,8 @@ def apply_task_bulk_mutation(
         case "requeue":
             return _requeue_task(session, task)
         case "delete":
-            task_is_active = task.status == "running"
+            queue_entry = session.get(QueueEntry, task.id)
+            task_is_active = task.status == "running" or queue_entry is not None and queue_entry.state == "running"
             if task_is_active:
                 return TaskBulkMutationOutcome(
                     task_id=task_id,

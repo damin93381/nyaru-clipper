@@ -65,7 +65,16 @@ def get_queue_endpoint(session: Session = Depends(get_session)) -> QueueSnapshot
     return _snapshot_response(get_queue_snapshot(session))
 
 
-@router.put("/order", response_model=QueueSnapshotResponse)
+@router.put(
+    "/order",
+    response_model=QueueSnapshotResponse,
+    responses={
+        409: {
+            "description": "The supplied queue revision is stale; the response body is the authoritative snapshot.",
+            "model": QueueSnapshotResponse,
+        }
+    },
+)
 def reorder_queue_endpoint(
     payload: QueueOrderRequest,
     session: Session = Depends(get_session),

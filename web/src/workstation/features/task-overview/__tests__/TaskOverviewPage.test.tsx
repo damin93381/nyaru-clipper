@@ -80,6 +80,7 @@ describe("TaskOverviewPage", () => {
     renderOverview();
 
     expect(await screen.findByRole("heading", { name: "夏日回放字幕审阅" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "夏日回放字幕审阅" })).toHaveClass("ny-task-overview__title");
     expect(screen.getByText("夏日直播回放")).toBeVisible();
     expect(screen.getByRole("list", { name: "任务阶段" })).toHaveTextContent(/采集.*媒体准备.*语音转写.*翻译.*高光.*导出.*报告/);
     expect(screen.getByRole("button", { name: /媒体准备/ }).querySelector(".ny-progress__stage-label")).toHaveTextContent("媒体准备");

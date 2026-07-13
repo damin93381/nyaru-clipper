@@ -20,6 +20,8 @@ export class QueueConflictError extends QueueApiError {
   }
 }
 
+type QueueSnapshotError = QueueSnapshot | components["schemas"]["HTTPValidationError"] | undefined;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -32,18 +34,19 @@ function isQueueItem(value: unknown): value is QueueItem {
     && typeof value.state === "string";
 }
 
-function isQueueSnapshot(value: unknown): value is QueueSnapshot {
-  return isRecord(value)
-    && typeof value.revision === "number"
-    && (value.active === null || isQueueItem(value.active))
-    && Array.isArray(value.queued)
-    && value.queued.every(isQueueItem)
-    && Array.isArray(value.paused)
-    && value.paused.every(isQueueItem);
+function isQueueSnapshot(value: QueueSnapshotError): value is QueueSnapshot {
+  if (!isRecord(value) || !("active" in value) || !("paused" in value) || !("queued" in value) || !("revision" in value)) return false;
+  const { active, paused, queued, revision } = value;
+  return typeof revision === "number"
+    && (active === null || isQueueItem(active))
+    && Array.isArray(queued)
+    && queued.every(isQueueItem)
+    && Array.isArray(paused)
+    && paused.every(isQueueItem);
 }
 
 async function requireQueueSnapshot(
-  request: Promise<{ readonly data?: QueueSnapshot; readonly error?: unknown; readonly response: Response }>,
+  request: Promise<{ readonly data?: QueueSnapshot; readonly error?: QueueSnapshotError; readonly response: Response }>,
   action: string,
 ): Promise<QueueSnapshot> {
   const { data, error, response } = await request;

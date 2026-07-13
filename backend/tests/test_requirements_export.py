@@ -153,6 +153,17 @@ def test_openapi_export_is_deterministic_and_contains_workstation_task_contract(
     assert "/api/v2/tasks" in schema["paths"]
 
 
+def test_openapi_declares_queue_conflicts_as_current_queue_snapshots(tmp_path) -> None:
+    output_path = tmp_path / "workstation-openapi.json"
+
+    result = _run_openapi_export(output_path)
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    schema = json.loads(output_path.read_text(encoding="utf-8"))
+    response = schema["paths"]["/api/v2/queue/order"]["put"]["responses"]["409"]
+    assert response["content"]["application/json"]["schema"] == {"$ref": "#/components/schemas/QueueSnapshotResponse"}
+
+
 def test_checked_in_workstation_contract_matches_the_backend_openapi_export(tmp_path) -> None:
     output_path = tmp_path / "workstation-openapi.json"
 

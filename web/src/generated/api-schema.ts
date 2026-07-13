@@ -1573,13 +1573,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description A replayable server-sent event stream. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -1648,6 +1648,15 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueSnapshotResponse"];
+                };
+            };
+            /** @description The supplied queue revision is stale; the response body is the authoritative snapshot. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
