@@ -127,3 +127,67 @@ def test_process_control_poll_preserves_dirty_runner_stage_checkpoint_when_no_ca
     assert cancel_requested is False
     assert force_kill_requested is False
     assert ingest_status == "success"
+
+
+def test_has_tracked_process_group_preserves_dirty_runner_stage_checkpoint(backend_env) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1runnercontrol008")
+
+    from app.db import session_scope
+    from app.models import TaskStage
+    from app.services.task_control import has_tracked_process_group
+
+    # Given: a runner has a dirty stage checkpoint and no tracked process group.
+    with session_scope() as session:
+        ingest_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "ingest")
+        ).one()
+        ingest_stage.status = "success"
+        session.add(ingest_stage)
+
+        # When: force-kill eligibility checks the execution-control record.
+        tracked = has_tracked_process_group(session, task_id=task_id)
+        ingest_status = ingest_stage.status
+
+    # Then: the read leaves the caller's uncommitted runner state intact.
+    assert tracked is False
+    assert ingest_status == "success"
+
+
+def test_best_effort_kill_preserves_dirty_runner_stage_and_signals_group(backend_env, monkeypatch) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1runnercontrol009")
+    process_group_id = 4321
+
+    from app.db import session_scope
+    from app.models import TaskExecutionControl, TaskStage
+    from app.services.task_control import activate_execution, best_effort_kill_active_process_group
+
+    # Given: a persisted active process group and a separate dirty runner checkpoint.
+    with session_scope() as session:
+        activate_execution(session, task_id=task_id, execution_token="token-active-process-group")
+        control = session.get(TaskExecutionControl, task_id)
+        assert control is not None
+        control.active_process_group_id = process_group_id
+        session.add(control)
+
+    signalled_process_groups: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "app.services.task_control.os.killpg",
+        lambda received_process_group_id, signal_number: signalled_process_groups.append(
+            (received_process_group_id, signal_number)
+        ),
+    )
+    with session_scope() as session:
+        ingest_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "ingest")
+        ).one()
+        ingest_stage.status = "success"
+        session.add(ingest_stage)
+
+        # When: stale-job recovery kills the tracked process group.
+        terminated_process_group_id = best_effort_kill_active_process_group(session, task_id=task_id)
+        ingest_status = ingest_stage.status
+
+    # Then: the group is still signalled and the caller's checkpoint is not expired.
+    assert terminated_process_group_id == process_group_id
+    assert signalled_process_groups == [(process_group_id, 9)]
+    assert ingest_status == "success"

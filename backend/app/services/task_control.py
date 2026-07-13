@@ -136,8 +136,8 @@ def request_force_kill(session: Session, *, task_id: str) -> None:
 
 def has_tracked_process_group(session: Session, *, task_id: str) -> bool:
     _ensure_control_table()
-    session.expire_all()
-    control = session.get(TaskExecutionControl, task_id)
+    with Session(get_engine()) as control_session:
+        control = control_session.get(TaskExecutionControl, task_id)
     return control is not None and control.active_process_group_id is not None
 
 
@@ -164,8 +164,8 @@ def best_effort_kill_active_process_group(
     signal_number: int = signal.SIGKILL,
 ) -> int | None:
     _ensure_control_table()
-    session.expire_all()
-    control = session.get(TaskExecutionControl, task_id)
+    with Session(get_engine()) as control_session:
+        control = control_session.get(TaskExecutionControl, task_id)
     if control is None or control.active_process_group_id is None:
         return None
     process_group_id = int(control.active_process_group_id)
