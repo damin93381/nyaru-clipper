@@ -1,6 +1,16 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { PrimitiveShowcasePage } from "../PrimitiveShowcasePage";
+
+beforeAll(() => {
+  class ResizeObserverMock {
+    disconnect() {}
+    observe() {}
+    unobserve() {}
+  }
+
+  globalThis.ResizeObserver = ResizeObserverMock;
+});
 
 describe("PrimitiveShowcasePage", () => {
   it("renders each workstation primitive and its required state coverage", () => {
@@ -75,5 +85,24 @@ describe("PrimitiveShowcasePage", () => {
     expect(await screen.findByRole("menuitem", { name: "归档任务" })).toBeVisible();
     fireEvent.click(screen.getByRole("menuitem", { name: "归档任务" }));
     expect(await screen.findByText("任务已归档")).toBeVisible();
+  });
+
+  it("keeps drawer and tooltip interactions keyboard-accessible", async () => {
+    render(<PrimitiveShowcasePage />);
+
+    const drawerTrigger = screen.getByRole("button", { name: "打开侧栏" });
+    drawerTrigger.focus();
+    fireEvent.click(drawerTrigger);
+    expect(await screen.findByRole("dialog", { name: "新建任务" })).toBeVisible();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "新建任务" })).not.toBeInTheDocument();
+    await waitFor(() => expect(drawerTrigger).toHaveFocus());
+
+    const tooltipTrigger = screen.getByRole("button", { name: "显示提示" });
+    fireEvent.focus(tooltipTrigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("键盘焦点会保留在当前行。");
+    expect(tooltipTrigger).toHaveAttribute("aria-describedby");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 });
