@@ -110,7 +110,8 @@
   text-wrap: pretty;
 }
 
-.ny-workstation__inspector-task-reference {
+.ny-workstation__inspector-task-reference,
+.ny-workstation__inspector-copy-phrase {
   white-space: nowrap;
 }
 

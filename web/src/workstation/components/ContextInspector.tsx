@@ -16,10 +16,21 @@ export function ContextInspector(): ReactNode {
           {hasTaskContext ? (
             <>
               <span className="ny-workstation__inspector-task-reference">任务 {taskId}</span>
-              的详细进度和恢复操作将在此处显示。
+              的详细进度和恢复操作将
+              <span className="ny-workstation__inspector-copy-phrase">
+                在<span className="ny-workstation__inspector-copy-phrase">此处显示</span>
+              </span>
+              。
             </>
           ) : (
-            "从任务库选择一项，即可在不离开当前工作区的情况下查看状态。"
+            <>
+              从任务库选择一项，即可在
+              <span className="ny-workstation__inspector-copy-phrase">
+                不离开<span className="ny-workstation__inspector-copy-phrase">当前工作区</span>
+                <span className="ny-workstation__inspector-copy-phrase">的情况下</span>
+              </span>
+              查看状态。
+            </>
           )}
         </p>
       </div>

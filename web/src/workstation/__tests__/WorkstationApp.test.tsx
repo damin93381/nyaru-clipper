@@ -179,4 +179,19 @@ describe("WorkstationApp", () => {
 
     expect(screen.getByText("任务 task-42")).toHaveClass("ny-workstation__inspector-task-reference");
   });
+
+  it("keeps semantic CJK inspector phrases together", () => {
+    vi.stubGlobal("EventSource", EventSourceHarness);
+    renderWorkstation(<WorkstationApp />);
+
+    expect(screen.getByText("当前工作区")).toHaveClass("ny-workstation__inspector-copy-phrase");
+    expect(screen.getByText("的情况下")).toHaveClass("ny-workstation__inspector-copy-phrase");
+  });
+
+  it("keeps the selected-task result phrase together", () => {
+    vi.stubGlobal("EventSource", EventSourceHarness);
+    renderWorkstation(<WorkstationApp />, { route: "/tasks/task-42" });
+
+    expect(screen.getByText("此处显示")).toHaveClass("ny-workstation__inspector-copy-phrase");
+  });
 });
