@@ -386,6 +386,8 @@ def run_task_pipeline(
                 elif stage.status not in {"success", "skipped"}:
                     _mark_stage_success(stage, summary=f"Completed {stage_name}")
 
+                session.add(stage)
+                publish_stage_updated(session, stage)
                 if _finalize_cancelled_if_requested(session, task_id=task_id):
                     sync_stage_run(session, pipeline_run.id, stage)
                     _sync_current_stage_run(session, pipeline_run.id, task_id)
@@ -402,7 +404,6 @@ def run_task_pipeline(
                 session.add(job)
                 session.add(stage)
                 publish_task_updated(session, task)
-                publish_stage_updated(session, stage)
                 sync_stage_run(session, pipeline_run.id, stage)
                 session.commit()
                 append_stage_log(log_path, f"task_runner:complete stage={stage_name} status={stage.status}")

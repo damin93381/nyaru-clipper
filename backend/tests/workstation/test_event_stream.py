@@ -248,6 +248,84 @@ def test_runner_cancellation_commits_public_task_and_stage_events(database) -> N
     ) in payloads_by_type
 
 
+def test_runner_publishes_completed_stage_before_post_completion_cancellation(database, monkeypatch) -> None:
+    from app.models import TaskStage, WorkstationEvent
+    from app.repositories.tasks import create_task
+    from app.services.task_control import TaskControlRequests, activate_execution
+    import app.services.task_runner as task_runner
+
+    # Given: the cancellation request arrives after an executor has completed ingest.
+    with Session(database) as session:
+        created, was_created = create_task(session, "https://www.bilibili.com/video/BV1eventcancel002")
+        task_id = created["task_id"]
+        session.commit()
+        activate_execution(session, task_id=task_id, execution_token="token-event-post-completion-cancel")
+
+    monkeypatch.setattr(
+        task_runner,
+        "STAGE_EXECUTORS",
+        {
+            "ingest": lambda _session, _task_id: None,
+            **{
+                stage_name: lambda _session, _task_id: None
+                for stage_name in task_runner.CANONICAL_STAGE_ORDER
+                if stage_name != "ingest"
+            },
+        },
+    )
+    control_checks = 0
+
+    def cancellation_requested_after_ingest_completion(_session, *, task_id: str) -> TaskControlRequests:
+        nonlocal control_checks
+        control_checks += 1
+        assert task_id
+        return TaskControlRequests(
+            cancel_requested=control_checks == 3,
+            force_kill_requested=False,
+        )
+
+    monkeypatch.setattr(
+        task_runner,
+        "get_control_requests",
+        cancellation_requested_after_ingest_completion,
+    )
+
+    # When: the runner reaches its post-executor cancellation checkpoint.
+    with Session(database) as session:
+        result = task_runner.run_task_pipeline(
+            session,
+            task_id,
+            execution_token="token-event-post-completion-cancel",
+        )
+
+    # Then: the successful stage and its event are durable before task cancellation is projected.
+    with Session(database) as session:
+        ingest_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "ingest")
+        ).one()
+        events = session.exec(select(WorkstationEvent).order_by(WorkstationEvent.id)).all()
+    payloads_by_id = [(event.id, event.event_type, json.loads(event.payload_json)) for event in events]
+    success_stage_event_id = next(
+        event_id
+        for event_id, event_type, payload in payloads_by_id
+        if event_type == "stage.updated"
+        and payload["task_id"] == task_id
+        and payload["stage_name"] == "ingest"
+        and payload["status"] == "success"
+    )
+    cancelled_task_event_id = next(
+        event_id
+        for event_id, event_type, payload in payloads_by_id
+        if event_type == "task.updated" and payload == {"task_id": task_id, "status": "cancelled"}
+    )
+
+    assert was_created is True
+    assert result.final_status == "cancelled"
+    assert ingest_stage.status == "success"
+    assert control_checks == 3
+    assert success_stage_event_id < cancelled_task_event_id
+
+
 def test_task_runner_stages_public_task_and_stage_events_at_stage_checkpoints(database, monkeypatch) -> None:
     from app.models import WorkstationEvent
     from app.repositories.tasks import create_task

@@ -102,3 +102,28 @@ def test_control_read_preserves_dirty_runner_stage_checkpoint_when_no_cancel(bac
     assert requests.cancel_requested is False
     assert requests.force_kill_requested is False
     assert ingest_status == "success"
+
+
+def test_process_control_poll_preserves_dirty_runner_stage_checkpoint_when_no_cancel(backend_env) -> None:
+    task_id = _create_task("https://www.bilibili.com/video/BV1runnercontrol007")
+
+    from app.db import session_scope
+    from app.models import TaskStage
+    from app.services.pipeline_support import _load_control_requests
+
+    # Given: a tracked-process poll occurs after the runner has completed a stage checkpoint.
+    with session_scope() as session:
+        ingest_stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == task_id).where(TaskStage.name == "ingest")
+        ).one()
+        ingest_stage.status = "success"
+        session.add(ingest_stage)
+
+        # When: the process-control poll reads a no-cancellation request.
+        cancel_requested, force_kill_requested = _load_control_requests(session, task_id=task_id)
+        ingest_status = ingest_stage.status
+
+    # Then: reading control state cannot expire the caller's dirty stage checkpoint.
+    assert cancel_requested is False
+    assert force_kill_requested is False
+    assert ingest_status == "success"

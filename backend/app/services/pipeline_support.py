@@ -15,6 +15,7 @@ from typing import Any, Callable
 from sqlmodel import Session, select
 
 import app.models as models
+from app.db import get_engine
 from app.services.workstation_events import publish_stage_updated, publish_task_updated
 
 PROCESS_GROUP_POLL_INTERVAL_SECONDS = 0.2
@@ -341,8 +342,8 @@ def _run_logged_structured_command(
 
 
 def _load_control_requests(session: Session, *, task_id: str) -> tuple[bool, bool]:
-    session.expire_all()
-    control = session.get(_task_execution_control_model(), task_id)
+    with Session(get_engine()) as control_session:
+        control = control_session.get(_task_execution_control_model(), task_id)
     if control is None:
         return False, False
     return bool(control.cancel_requested), bool(control.force_kill_requested)

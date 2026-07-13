@@ -136,3 +136,21 @@
 - Compatibility: `PATH=/home/drm/workfile/nyaru-clipper/backend/.venv/bin:$PATH PYTHONPATH=backend /home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m pytest backend/tests/workstation/test_event_stream.py backend/tests/workstation/test_queue_service.py backend/tests/workstation/test_queue_api.py backend/tests/workstation/test_task_create_api.py backend/tests/test_task_control_runner_state.py backend/tests/test_task_runner.py backend/tests/test_pipeline_support.py backend/tests/test_task_execution_progress_repo.py backend/tests/test_tasks_api.py backend/tests/test_worker_runtime_warnings.py -q -s` — `67 passed, 1 existing Hugging Face deprecation warning in 83.76s`.
 - `PYTHONPATH=backend /home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m compileall -q backend/app/services/task_control.py backend/tests/test_task_control_runner_state.py` — passed.
 - `git diff --check` — passed.
+
+## Final P1 follow-up: post-completion cancellation and process-control polling
+
+### Root cause and fix
+
+- After an executor marked a stage `success` or `skipped`, the runner checked for cancellation before it staged the corresponding `stage.updated` projection. A cancellation at that exact checkpoint committed the stage mutation during finalization but returned without the completed-stage event. The runner now stages the completed stage and its public projection before checking for cancellation; normal completion reuses that projection instead of emitting a duplicate.
+- `pipeline_support._load_control_requests` refreshed its caller session with `expire_all()`. A tracked-process control poll could therefore discard a dirty runner checkpoint before it was committed. The poll now reads `TaskExecutionControl` through an isolated short-lived session, matching `get_control_requests` while preserving externally committed cancel and force-kill requests.
+
+### Regression coverage
+
+- `test_runner_publishes_completed_stage_before_post_completion_cancellation` simulates a cancellation control response at the post-ingest checkpoint and verifies the persisted successful stage, its durable `stage.updated` projection, and that the stage event precedes the cancellation `task.updated` event.
+- `test_process_control_poll_preserves_dirty_runner_stage_checkpoint_when_no_cancel` proves the tracked-process control-poll helper does not expire a dirty successful stage checkpoint.
+
+### Verification
+
+- RED: `PYTHONPATH=backend /home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m pytest backend/tests/test_task_control_runner_state.py::test_process_control_poll_preserves_dirty_runner_stage_checkpoint_when_no_cancel backend/tests/workstation/test_event_stream.py::test_runner_publishes_completed_stage_before_post_completion_cancellation -q -s` — both failures reproduced: the poll reloaded the dirty stage as `pending`, and no completed-stage event existed after post-completion cancellation.
+- GREEN focused: `PYTHONPATH=backend /home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m pytest backend/tests/workstation/test_event_stream.py backend/tests/test_task_control_runner_state.py backend/tests/test_task_runner.py backend/tests/test_pipeline_support.py backend/tests/test_task_execution_progress_repo.py -q -s` — `31 passed in 28.88s`.
+- Compatibility: `PATH=/home/drm/workfile/nyaru-clipper/backend/.venv/bin:$PATH PYTHONPATH=backend /home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m pytest backend/tests/workstation/test_event_stream.py backend/tests/workstation/test_queue_service.py backend/tests/workstation/test_queue_api.py backend/tests/workstation/test_task_create_api.py backend/tests/test_task_control_runner_state.py backend/tests/test_task_runner.py backend/tests/test_pipeline_support.py backend/tests/test_task_execution_progress_repo.py backend/tests/test_tasks_api.py backend/tests/test_worker_runtime_warnings.py -q -s` — `69 passed, 1 existing Hugging Face deprecation warning in 71.54s`.
