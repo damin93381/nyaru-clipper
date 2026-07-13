@@ -5,6 +5,7 @@ import type { WorkstationConnectionState } from "../api/useWorkstationEvents";
 import { AppShell } from "../components/AppShell";
 import { PrimitiveShowcasePage } from "./PrimitiveShowcasePage";
 import { TaskLibraryPage } from "../features/task-library/TaskLibraryPage";
+import { QueuePage } from "../features/queue/QueuePage";
 
 interface WorkstationRouterProps {
   readonly connectionState: WorkstationConnectionState;
@@ -31,7 +32,7 @@ export function WorkstationRouter({ connectionState }: WorkstationRouterProps): 
     <Routes>
       <Route path="*" element={<AppShell connectionState={connectionState} />}>
         <Route index element={<TaskLibraryPage />} />
-        <Route path="queue" element={<WorkspacePage description="处理队列会在下一步提供排序、暂停与恢复控制。" title="处理队列" />} />
+        <Route path="queue" element={<QueuePage />} />
         <Route path="tasks/:taskId" element={<TaskWorkspacePage />} />
         {import.meta.env.DEV ? <Route path="design-system" element={<PrimitiveShowcasePage />} /> : null}
       </Route>
