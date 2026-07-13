@@ -193,8 +193,8 @@ def clear_execution_control(session: Session, *, task_id: str) -> None:
 
 def get_control_requests(session: Session, *, task_id: str) -> TaskControlRequests:
     _ensure_control_table()
-    session.expire_all()
-    control = session.get(TaskExecutionControl, task_id)
+    with Session(get_engine()) as control_session:
+        control = control_session.get(TaskExecutionControl, task_id)
     if control is None:
         return TaskControlRequests(cancel_requested=False, force_kill_requested=False)
     return TaskControlRequests(
