@@ -1,0 +1,2832 @@
+{
+  "components": {
+    "schemas": {
+      "ArtifactReadinessOverview": {
+        "description": "The availability state for the stage's expected public artifact.",
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "stage_name": {
+            "title": "Stage Name",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "missing",
+              "failed",
+              "not_ready"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_name",
+          "kind",
+          "status",
+          "artifact_id",
+          "path"
+        ],
+        "title": "ArtifactReadinessOverview",
+        "type": "object"
+      },
+      "BilibiliInspectRequest": {
+        "additionalProperties": false,
+        "description": "The Bilibili URL accepted by the source-inspection boundary.",
+        "properties": {
+          "url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "BilibiliInspectRequest",
+        "type": "object"
+      },
+      "BilibiliInspectionResponse": {
+        "description": "Safe Bilibili source metadata for task creation.",
+        "properties": {
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "normalized_url": {
+            "title": "Normalized Url",
+            "type": "string"
+          },
+          "source_video_id": {
+            "title": "Source Video Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "uploader": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploader"
+          }
+        },
+        "required": [
+          "normalized_url",
+          "source_video_id",
+          "title",
+          "uploader",
+          "duration_seconds"
+        ],
+        "title": "BilibiliInspectionResponse",
+        "type": "object"
+      },
+      "BilibiliTaskSource": {
+        "additionalProperties": false,
+        "description": "A Bilibili source selected by URL.",
+        "properties": {
+          "kind": {
+            "const": "bilibili",
+            "title": "Kind",
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url"
+        ],
+        "title": "BilibiliTaskSource",
+        "type": "object"
+      },
+      "BulkTaskMutationRequest": {
+        "additionalProperties": false,
+        "description": "One explicit operation over task identifiers in request order.",
+        "properties": {
+          "operation": {
+            "enum": [
+              "archive",
+              "unarchive",
+              "delete"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "task_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Task Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "operation",
+          "task_ids"
+        ],
+        "title": "BulkTaskMutationRequest",
+        "type": "object"
+      },
+      "BulkTaskMutationResponse": {
+        "description": "Ordered outcomes for a bulk task mutation.",
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/BulkTaskMutationResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "BulkTaskMutationResponse",
+        "type": "object"
+      },
+      "BulkTaskMutationResult": {
+        "description": "The independently observable outcome for one bulk task identifier.",
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "not_found",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status",
+          "message"
+        ],
+        "title": "BulkTaskMutationResult",
+        "type": "object"
+      },
+      "CreateTaskRequest": {
+        "properties": {
+          "source_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Source Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_url"
+        ],
+        "title": "CreateTaskRequest",
+        "type": "object"
+      },
+      "CreateWorkstationTaskRequest": {
+        "additionalProperties": false,
+        "description": "The v2 source, profile, and scheduling request for one new task.",
+        "properties": {
+          "priority": {
+            "default": 0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "profile_id": {
+            "const": "standard",
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "source": {
+            "discriminator": {
+              "mapping": {
+                "bilibili": "#/components/schemas/BilibiliTaskSource",
+                "local": "#/components/schemas/LocalTaskSource"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BilibiliTaskSource"
+              },
+              {
+                "$ref": "#/components/schemas/LocalTaskSource"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "source",
+          "profile_id"
+        ],
+        "title": "CreateWorkstationTaskRequest",
+        "type": "object"
+      },
+      "CreateWorkstationTaskResponse": {
+        "description": "The accepted v2 task identity and selected scheduling options.",
+        "properties": {
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "profile_id": {
+            "const": "standard",
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "pending",
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "profile_id",
+          "priority",
+          "status"
+        ],
+        "title": "CreateWorkstationTaskResponse",
+        "type": "object"
+      },
+      "DownloadAsrModelRecoveryAction": {
+        "additionalProperties": false,
+        "description": "Download the ASR models required to recover a missing-model failure.",
+        "properties": {
+          "confirmation_required": {
+            "const": false,
+            "title": "Confirmation Required",
+            "type": "boolean"
+          },
+          "description_key": {
+            "const": "download_asr_model",
+            "title": "Description Key",
+            "type": "string"
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "id": {
+            "const": "download_asr_model",
+            "title": "Id",
+            "type": "string"
+          },
+          "label_key": {
+            "const": "download_asr_model",
+            "title": "Label Key",
+            "type": "string"
+          },
+          "method": {
+            "const": "POST",
+            "title": "Method",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/DownloadAsrModelRecoveryPayload"
+          },
+          "success_behavior": {
+            "const": "retry_stage_after_success",
+            "title": "Success Behavior",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label_key",
+          "description_key",
+          "enabled",
+          "disabled_reason",
+          "method",
+          "endpoint",
+          "payload",
+          "confirmation_required",
+          "success_behavior"
+        ],
+        "title": "DownloadAsrModelRecoveryAction",
+        "type": "object"
+      },
+      "DownloadAsrModelRecoveryPayload": {
+        "additionalProperties": false,
+        "description": "The model cache keys required by an ASR model download.",
+        "properties": {
+          "model_keys": {
+            "items": {
+              "enum": [
+                "whisperx",
+                "alignment"
+              ],
+              "type": "string"
+            },
+            "title": "Model Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_keys"
+        ],
+        "title": "DownloadAsrModelRecoveryPayload",
+        "type": "object"
+      },
+      "DownloadAsrModelsRequest": {
+        "properties": {
+          "model_keys": {
+            "items": {
+              "enum": [
+                "whisperx",
+                "alignment"
+              ],
+              "type": "string"
+            },
+            "title": "Model Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_keys"
+        ],
+        "title": "DownloadAsrModelsRequest",
+        "type": "object"
+      },
+      "ExecutionProgressOverview": {
+        "description": "Current worker progress, when a stage reports it.",
+        "properties": {
+          "current_phase": {
+            "title": "Current Phase",
+            "type": "string"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "latest_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Message"
+          },
+          "phase_count": {
+            "minimum": 0.0,
+            "title": "Phase Count",
+            "type": "integer"
+          },
+          "phase_index": {
+            "minimum": 0.0,
+            "title": "Phase Index",
+            "type": "integer"
+          },
+          "phase_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Started At"
+          },
+          "phases": {
+            "items": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              "type": "object"
+            },
+            "title": "Phases",
+            "type": "array"
+          },
+          "stage_name": {
+            "title": "Stage Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_name",
+          "current_phase",
+          "phase_index",
+          "phase_count",
+          "latest_message",
+          "phase_started_at",
+          "heartbeat_at",
+          "phases"
+        ],
+        "title": "ExecutionProgressOverview",
+        "type": "object"
+      },
+      "ExportClipRequest": {
+        "properties": {
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "integer"
+          },
+          "end_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End S"
+          },
+          "start_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start S"
+          }
+        },
+        "required": [
+          "candidate_id"
+        ],
+        "title": "ExportClipRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JsonValue": {},
+      "LocalDirectoryResponse": {
+        "description": "The discovered roots and entries for one optional selected directory.",
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/LocalEntryResponse"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Id"
+          },
+          "roots": {
+            "items": {
+              "$ref": "#/components/schemas/LocalRootResponse"
+            },
+            "title": "Roots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "roots",
+          "root_id",
+          "relative_path",
+          "entries"
+        ],
+        "title": "LocalDirectoryResponse",
+        "type": "object"
+      },
+      "LocalEntryResponse": {
+        "description": "A safe local catalog entry without a host-path disclosure.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "relative_path",
+          "kind"
+        ],
+        "title": "LocalEntryResponse",
+        "type": "object"
+      },
+      "LocalRootResponse": {
+        "description": "An opaque trusted-root identity and display name.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "LocalRootResponse",
+        "type": "object"
+      },
+      "LocalTaskSource": {
+        "additionalProperties": false,
+        "description": "A selected supported file within a configured local import root.",
+        "properties": {
+          "import_mode": {
+            "const": "reference",
+            "title": "Import Mode",
+            "type": "string"
+          },
+          "kind": {
+            "const": "local",
+            "title": "Kind",
+            "type": "string"
+          },
+          "relative_path": {
+            "minLength": 1,
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "root_id": {
+            "minLength": 1,
+            "title": "Root Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "root_id",
+          "relative_path",
+          "import_mode"
+        ],
+        "title": "LocalTaskSource",
+        "type": "object"
+      },
+      "ProcessingProfileResponse": {
+        "description": "A fixed first-phase processing profile.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "stages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "stages"
+        ],
+        "title": "ProcessingProfileResponse",
+        "type": "object"
+      },
+      "ProcessingProfilesResponse": {
+        "description": "The complete set of available processing profiles.",
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessingProfileResponse"
+            },
+            "title": "Profiles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profiles"
+        ],
+        "title": "ProcessingProfilesResponse",
+        "type": "object"
+      },
+      "QueueItemResponse": {
+        "description": "Public queue entry fields.",
+        "properties": {
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "position",
+          "priority",
+          "state"
+        ],
+        "title": "QueueItemResponse",
+        "type": "object"
+      },
+      "QueueOrderRequest": {
+        "additionalProperties": false,
+        "description": "A complete replacement ordering for all currently queued task IDs.",
+        "properties": {
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "ordered_task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 0,
+            "title": "Ordered Task Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ordered_task_ids",
+          "expected_revision"
+        ],
+        "title": "QueueOrderRequest",
+        "type": "object"
+      },
+      "QueueSnapshotResponse": {
+        "description": "Revisioned queue document used for optimistic updates.",
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueueItemResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paused": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItemResponse"
+            },
+            "title": "Paused",
+            "type": "array"
+          },
+          "queued": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItemResponse"
+            },
+            "title": "Queued",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "active",
+          "queued",
+          "paused"
+        ],
+        "title": "QueueSnapshotResponse",
+        "type": "object"
+      },
+      "QueueStateRequest": {
+        "additionalProperties": false,
+        "description": "The supported manual queue states.",
+        "properties": {
+          "state": {
+            "enum": [
+              "queued",
+              "paused"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "QueueStateRequest",
+        "type": "object"
+      },
+      "RetryStageRecoveryAction": {
+        "additionalProperties": false,
+        "description": "Retry the failed stage selected by the backend.",
+        "properties": {
+          "confirmation_required": {
+            "const": false,
+            "title": "Confirmation Required",
+            "type": "boolean"
+          },
+          "description_key": {
+            "const": "retry_stage",
+            "title": "Description Key",
+            "type": "string"
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "id": {
+            "const": "retry_stage",
+            "title": "Id",
+            "type": "string"
+          },
+          "label_key": {
+            "const": "retry_stage",
+            "title": "Label Key",
+            "type": "string"
+          },
+          "method": {
+            "const": "POST",
+            "title": "Method",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RetryStageRecoveryPayload"
+          },
+          "success_behavior": {
+            "const": "poll_task",
+            "title": "Success Behavior",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label_key",
+          "description_key",
+          "enabled",
+          "disabled_reason",
+          "method",
+          "endpoint",
+          "payload",
+          "confirmation_required",
+          "success_behavior"
+        ],
+        "title": "RetryStageRecoveryAction",
+        "type": "object"
+      },
+      "RetryStageRecoveryPayload": {
+        "additionalProperties": false,
+        "description": "The one required parameter for a stage-retry action.",
+        "properties": {
+          "stage_name": {
+            "title": "Stage Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_name"
+        ],
+        "title": "RetryStageRecoveryPayload",
+        "type": "object"
+      },
+      "RetryTaskRequest": {
+        "properties": {
+          "stage_name": {
+            "title": "Stage Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_name"
+        ],
+        "title": "RetryTaskRequest",
+        "type": "object"
+      },
+      "SafeLogOverview": {
+        "description": "A redacted stage-log summary safe to disclose to the workstation UI.",
+        "properties": {
+          "display_label": {
+            "title": "Display Label",
+            "type": "string"
+          },
+          "stage_name": {
+            "title": "Stage Name",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "planned",
+              "running",
+              "success",
+              "failed",
+              "cancelled",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "stage_name",
+          "status",
+          "summary",
+          "display_label"
+        ],
+        "title": "SafeLogOverview",
+        "type": "object"
+      },
+      "TaskArtifactOverview": {
+        "description": "A public artifact reference without a raw host path.",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata_json": {
+            "title": "Metadata Json",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "stage_name": {
+            "title": "Stage Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "stage_name",
+          "kind",
+          "path",
+          "metadata_json",
+          "created_at"
+        ],
+        "title": "TaskArtifactOverview",
+        "type": "object"
+      },
+      "TaskLibrarySummary": {
+        "description": "Dashboard counters for the complete task library.",
+        "properties": {
+          "active": {
+            "minimum": 0.0,
+            "title": "Active",
+            "type": "integer"
+          },
+          "archived": {
+            "minimum": 0.0,
+            "title": "Archived",
+            "type": "integer"
+          },
+          "failed": {
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "queued": {
+            "minimum": 0.0,
+            "title": "Queued",
+            "type": "integer"
+          },
+          "review_required": {
+            "minimum": 0.0,
+            "title": "Review Required",
+            "type": "integer"
+          },
+          "storage_bytes": {
+            "minimum": 0.0,
+            "title": "Storage Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "queued",
+          "review_required",
+          "failed",
+          "archived",
+          "storage_bytes"
+        ],
+        "title": "TaskLibrarySummary",
+        "type": "object"
+      },
+      "TaskListItem": {
+        "description": "A bounded task-library row.",
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Stage"
+          },
+          "progress_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress Percent",
+            "type": "integer"
+          },
+          "source_kind": {
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "source_label": {
+            "title": "Source Label",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "success",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "storage_bytes": {
+            "minimum": 0.0,
+            "title": "Storage Bytes",
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "title",
+          "source_kind",
+          "source_label",
+          "status",
+          "current_stage",
+          "progress_percent",
+          "tags",
+          "storage_bytes",
+          "created_at",
+          "updated_at",
+          "archived_at"
+        ],
+        "title": "TaskListItem",
+        "type": "object"
+      },
+      "TaskListPage": {
+        "description": "A page of task-library rows and its exact SQL count.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_count": {
+            "title": "Page Count",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total",
+          "page_count"
+        ],
+        "title": "TaskListPage",
+        "type": "object"
+      },
+      "TaskOverview": {
+        "description": "Complete workstation projection for one task.",
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "artifact_readiness": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactReadinessOverview"
+            },
+            "title": "Artifact Readiness",
+            "type": "array"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/TaskArtifactOverview"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Stage"
+          },
+          "execution_progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionProgressOverview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pipeline_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipeline Run Id"
+          },
+          "progress_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress Percent",
+            "type": "integer"
+          },
+          "recovery_actions": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "download_asr_model": "#/components/schemas/DownloadAsrModelRecoveryAction",
+                  "retry_stage": "#/components/schemas/RetryStageRecoveryAction"
+                },
+                "propertyName": "id"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DownloadAsrModelRecoveryAction"
+                },
+                {
+                  "$ref": "#/components/schemas/RetryStageRecoveryAction"
+                }
+              ]
+            },
+            "title": "Recovery Actions",
+            "type": "array"
+          },
+          "safe_logs": {
+            "items": {
+              "$ref": "#/components/schemas/SafeLogOverview"
+            },
+            "title": "Safe Logs",
+            "type": "array"
+          },
+          "source_kind": {
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "source_label": {
+            "title": "Source Label",
+            "type": "string"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/TaskStageOverview"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "success",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "storage_bytes": {
+            "minimum": 0.0,
+            "title": "Storage Bytes",
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "title",
+          "source_kind",
+          "source_label",
+          "status",
+          "current_stage",
+          "progress_percent",
+          "tags",
+          "storage_bytes",
+          "created_at",
+          "updated_at",
+          "archived_at",
+          "pipeline_run_id",
+          "stages",
+          "execution_progress",
+          "artifact_readiness",
+          "artifacts",
+          "safe_logs",
+          "recovery_actions"
+        ],
+        "title": "TaskOverview",
+        "type": "object"
+      },
+      "TaskPatchRequest": {
+        "additionalProperties": false,
+        "description": "Editable task-library metadata, with absent fields left unchanged.",
+        "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "TaskPatchRequest",
+        "type": "object"
+      },
+      "TaskStageOverview": {
+        "description": "One ordered pipeline-stage projection for a task overview.",
+        "properties": {
+          "attempts": {
+            "minimum": 0.0,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "planned": {
+            "title": "Planned",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "planned",
+              "running",
+              "success",
+              "failed",
+              "cancelled",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "summary",
+          "failure_code",
+          "attempts",
+          "started_at",
+          "finished_at",
+          "planned"
+        ],
+        "title": "TaskStageOverview",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Bilibili VTuber Suite API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "read_root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Read Root  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read Root"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "healthcheck_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Healthcheck Api Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthcheck",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/runtime/capabilities": {
+      "get": {
+        "operationId": "runtime_capabilities_api_runtime_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Runtime Capabilities Api Runtime Capabilities Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Runtime Capabilities",
+        "tags": [
+          "runtime"
+        ]
+      }
+    },
+    "/api/tasks": {
+      "post": {
+        "operationId": "create_task_endpoint_api_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Task Endpoint Api Tasks Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Task Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}": {
+      "get": {
+        "operationId": "task_detail_endpoint_api_tasks__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Task Detail Endpoint Api Tasks  Task Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Detail Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/artifacts": {
+      "get": {
+        "operationId": "task_artifacts_endpoint_api_tasks__task_id__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Task Artifacts Endpoint Api Tasks  Task Id  Artifacts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Artifacts Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/artifacts/{artifact_id}/content/{filename}": {
+      "get": {
+        "operationId": "task_artifact_content_endpoint_api_tasks__task_id__artifacts__artifact_id__content__filename__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Artifact Content Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/asr/models/download": {
+      "post": {
+        "operationId": "task_asr_model_download_endpoint_api_tasks__task_id__asr_models_download_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadAsrModelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Task Asr Model Download Endpoint Api Tasks  Task Id  Asr Models Download Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Asr Model Download Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/cancel": {
+      "post": {
+        "operationId": "task_cancel_endpoint_api_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Task Cancel Endpoint Api Tasks  Task Id  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Cancel Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/clips": {
+      "post": {
+        "operationId": "task_clip_export_endpoint_api_tasks__task_id__clips_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportClipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Task Clip Export Endpoint Api Tasks  Task Id  Clips Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Clip Export Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/force-kill": {
+      "post": {
+        "operationId": "task_force_kill_endpoint_api_tasks__task_id__force_kill_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Task Force Kill Endpoint Api Tasks  Task Id  Force Kill Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Force Kill Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/logs": {
+      "get": {
+        "operationId": "task_logs_endpoint_api_tasks__task_id__logs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Task Logs Endpoint Api Tasks  Task Id  Logs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Logs Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/retry": {
+      "post": {
+        "operationId": "task_retry_endpoint_api_tasks__task_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Task Retry Endpoint Api Tasks  Task Id  Retry Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Retry Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/stages": {
+      "get": {
+        "operationId": "task_stages_endpoint_api_tasks__task_id__stages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Task Stages Endpoint Api Tasks  Task Id  Stages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Stages Endpoint",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v2/events": {
+      "get": {
+        "description": "Keep a browser client synchronized through replayable SSE state changes.",
+        "operationId": "workstation_events_endpoint_api_v2_events_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Workstation Events Endpoint",
+        "tags": [
+          "workstation-events"
+        ]
+      }
+    },
+    "/api/v2/processing-profiles": {
+      "get": {
+        "description": "Return the sole first-phase profile without per-stage toggle decoration.",
+        "operationId": "processing_profiles_endpoint_api_v2_processing_profiles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingProfilesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Processing Profiles Endpoint",
+        "tags": [
+          "workstation-sources"
+        ]
+      }
+    },
+    "/api/v2/queue": {
+      "get": {
+        "description": "Read the current manual scheduling queue.",
+        "operationId": "get_queue_endpoint_api_v2_queue_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Queue Endpoint",
+        "tags": [
+          "workstation-queue"
+        ]
+      }
+    },
+    "/api/v2/queue/order": {
+      "put": {
+        "description": "Replace the queued ordering if the supplied revision is still current.",
+        "operationId": "reorder_queue_endpoint_api_v2_queue_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reorder Queue Endpoint",
+        "tags": [
+          "workstation-queue"
+        ]
+      }
+    },
+    "/api/v2/queue/{task_id}": {
+      "patch": {
+        "description": "Pause or resume a waiting task.",
+        "operationId": "set_queue_state_endpoint_api_v2_queue__task_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Queue State Endpoint",
+        "tags": [
+          "workstation-queue"
+        ]
+      }
+    },
+    "/api/v2/sources/bilibili/inspect": {
+      "post": {
+        "description": "Inspect one normalized Bilibili source without creating a task.",
+        "operationId": "inspect_bilibili_source_endpoint_api_v2_sources_bilibili_inspect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BilibiliInspectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BilibiliInspectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect Bilibili Source Endpoint",
+        "tags": [
+          "workstation-sources"
+        ]
+      }
+    },
+    "/api/v2/sources/local": {
+      "get": {
+        "description": "Browse only explicitly configured local-import roots and descendants.",
+        "operationId": "local_source_catalog_endpoint_api_v2_sources_local_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "root_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Root Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relative_path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Relative Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalDirectoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Local Source Catalog Endpoint",
+        "tags": [
+          "workstation-sources"
+        ]
+      }
+    },
+    "/api/v2/tasks": {
+      "get": {
+        "description": "Return the requested bounded library page.",
+        "operationId": "list_task_library_endpoint_api_v2_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Query"
+            }
+          },
+          {
+            "in": "query",
+            "name": "statuses",
+            "required": false,
+            "schema": {
+              "items": {
+                "enum": [
+                  "pending",
+                  "running",
+                  "success",
+                  "failed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "title": "Statuses",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated_at",
+              "enum": [
+                "updated_at",
+                "created_at",
+                "title",
+                "storage_bytes"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskListPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Task Library Endpoint",
+        "tags": [
+          "workstation-tasks"
+        ]
+      },
+      "post": {
+        "description": "Create all legacy and workstation task records in one database transaction.",
+        "operationId": "create_workstation_task_endpoint_api_v2_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkstationTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWorkstationTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Workstation Task Endpoint",
+        "tags": [
+          "workstation-tasks"
+        ]
+      }
+    },
+    "/api/v2/tasks/bulk": {
+      "post": {
+        "description": "Apply one archive, unarchive, or deletion operation per requested task.",
+        "operationId": "bulk_task_mutation_endpoint_api_v2_tasks_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkTaskMutationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkTaskMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Task Mutation Endpoint",
+        "tags": [
+          "workstation-tasks"
+        ]
+      }
+    },
+    "/api/v2/tasks/summary": {
+      "get": {
+        "description": "Return task-library dashboard counters.",
+        "operationId": "task_library_summary_endpoint_api_v2_tasks_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLibrarySummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Task Library Summary Endpoint",
+        "tags": [
+          "workstation-tasks"
+        ]
+      }
+    },
+    "/api/v2/tasks/{task_id}": {
+      "get": {
+        "description": "Return one complete task-library overview.",
+        "operationId": "task_library_overview_endpoint_api_v2_tasks__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Task Library Overview Endpoint",
+        "tags": [
+          "workstation-tasks"
+        ]
+      },
+      "patch": {
+        "description": "Replace the requested editable task metadata fields.",
+        "operationId": "patch_task_library_endpoint_api_v2_tasks__task_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Task Library Endpoint",
+        "tags": [
+          "workstation-tasks"
+        ]
+      }
+    }
+  }
+}

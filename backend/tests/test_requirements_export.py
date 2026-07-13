@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPORT_SCRIPT = REPO_ROOT / "scripts" / "export_backend_requirements.sh"
+OPENAPI_EXPORT_SCRIPT = REPO_ROOT / "scripts" / "export_openapi_schema.py"
 CUDA_PROFILE_PATH = REPO_ROOT / "backend" / "requirements-linux-cuda.txt"
 WSL_ROCM_PROFILE_PATH = REPO_ROOT / "backend" / "requirements-wsl-rocm.txt"
 
@@ -25,6 +28,16 @@ PACKAGE_NAME_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
 def _run_export(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(EXPORT_SCRIPT), *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_openapi_export(output_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(OPENAPI_EXPORT_SCRIPT), "--output", str(output_path)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -99,6 +112,21 @@ def test_export_script_check_detects_stale_requirements_file(tmp_path) -> None:
 
     assert stale_result.returncode == 1
     assert "stale" in (stale_result.stderr or stale_result.stdout).lower()
+
+
+def test_openapi_export_is_deterministic_and_contains_workstation_task_contract(tmp_path) -> None:
+    first_output_path = tmp_path / "first-openapi.json"
+    second_output_path = tmp_path / "second-openapi.json"
+
+    first_result = _run_openapi_export(first_output_path)
+    second_result = _run_openapi_export(second_output_path)
+
+    assert first_result.returncode == 0, first_result.stderr or first_result.stdout
+    assert second_result.returncode == 0, second_result.stderr or second_result.stdout
+    assert first_output_path.read_bytes() == second_output_path.read_bytes()
+
+    schema = json.loads(first_output_path.read_text(encoding="utf-8"))
+    assert "/api/v2/tasks" in schema["paths"]
 
 
 def test_checked_in_linux_cuda_profile_artifact_contains_cuda_runtime_requirements() -> None:

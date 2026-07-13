@@ -11,10 +11,13 @@
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
     "test": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "api:export": "if [ -x ../backend/.venv/bin/python ]; then ../backend/.venv/bin/python ../scripts/export_openapi_schema.py --output openapi.json; else ../../../backend/.venv/bin/python ../scripts/export_openapi_schema.py --output openapi.json; fi",
+    "api:generate": "pnpm api:export && openapi-typescript openapi.json -o src/generated/api-schema.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.1",
+    "openapi-fetch": "^0.14.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.14.2"
@@ -27,6 +30,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vitest": "^2.1.4"
