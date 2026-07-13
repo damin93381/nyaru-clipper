@@ -28,6 +28,7 @@ Nyaru-Clipper is a calm, precise desktop workstation for one operator managing m
 | Primary accent | `--ny-accent` | `#a43c2e` | Primary action, selection, active state, destructive emphasis when paired with a label |
 | Success | `--ny-success` | `#3e6755` | Successful stages and ready artifacts |
 | Warning | `--ny-warning` | `#a77322` | Intervention-required and caution states |
+| Warning ink | `--ny-warning-ink` | `#765015` | Warning text and icons; preserves 4.5:1 text contrast on ivory surfaces |
 | Danger | `--ny-danger` | `#8f2f2f` | Failed state and destructive confirmation |
 | Focus | `--ny-focus` | `#315f8a` | Keyboard focus ring only |
 
@@ -130,7 +131,7 @@ The strategy is **mixed, ruled paper**: a small-radius ivory plane, a 1 px warm-
 
 ### Constraints
 
-- Target WCAG 2.2 AA: minimum 4.5:1 text contrast and 3:1 large text / UI-component contrast.
+- Target WCAG 2.2 AA: minimum 4.5:1 text contrast and 3:1 large text / UI-component contrast. Focus uses a solid `--ny-focus` 3 px outline so its boundary exceeds the 3:1 component threshold on adjacent paper surfaces; warning text/icons use `--ny-warning-ink`, not the lighter warning border token.
 - Every interactive control is keyboard reachable, visibly focusable, and at least 44 × 44 px.
 - Modal, drawer, menu, tooltip, and toast semantics use Radix primitives with keyboard and assistive-technology behavior retained.
 - Status, selection, and failure use text plus iconography as well as color.
