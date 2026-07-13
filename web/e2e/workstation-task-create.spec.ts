@@ -22,7 +22,7 @@ test("creates an inspected Bilibili task and exposes it in the ordered queue", a
       return;
     }
     if (pathname === "/api/v2/tasks/summary") {
-      await route.fulfill({ json: { active: 0, archived: 0, failed: 0, pending: 0, running: 0, total: 0 } });
+      await route.fulfill({ json: { active: 0, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 0 } });
       return;
     }
     if (pathname === "/api/v2/tasks") {
@@ -39,6 +39,9 @@ test("creates an inspected Bilibili task and exposes it in the ordered queue", a
   });
 
   await page.goto(`${process.env.WORKSTATION_E2E_BASE_URL ?? ""}/workstation`);
+  await expect(page.getByLabel("任务库摘要")).toContainText("队列中 0");
+  await expect(page.getByRole("main")).not.toContainText("undefined");
+  await expect(page.getByRole("main")).not.toContainText("NaN");
   await page.getByRole("button", { name: "新建任务" }).click();
   await page.getByRole("button", { name: "Bilibili 录播" }).click();
   await page.getByRole("textbox", { name: "Bilibili 链接" }).fill("https://www.bilibili.com/video/BV1e2ecreate");

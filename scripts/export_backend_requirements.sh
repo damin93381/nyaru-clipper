@@ -10,6 +10,15 @@ OUTPUT_PATH="${DEFAULT_OUTPUT_PATH}"
 CHECK_ONLY=0
 ALL_ARTIFACTS=1
 PYTHON_VERSION="3.11"
+PYTHON_BIN="${BACKEND_PYTHON:-}"
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+  if [[ -x "${BACKEND_DIR}/.venv/bin/python" ]]; then
+    PYTHON_BIN="${BACKEND_DIR}/.venv/bin/python"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
 
 usage() {
   printf 'Usage: %s [--check] [--output PATH]\n' "$(basename "$0")" >&2
@@ -52,7 +61,7 @@ while (($# > 0)); do
   esac
 done
 
-require_commands uv python3 cmp mktemp
+require_commands uv "${PYTHON_BIN}" cmp mktemp
 
 GENERIC_INPUT_PATH="$(mktemp)"
 GENERIC_RAW_PATH="$(mktemp)"
@@ -82,7 +91,7 @@ write_profile_input() {
   local profile_name="$1"
   local destination_path="$2"
 
-  PROFILE_NAME="${profile_name}" BACKEND_PYPROJECT_PATH="${BACKEND_DIR}/pyproject.toml" DESTINATION_PATH="${destination_path}" python3 - <<'PY'
+  PROFILE_NAME="${profile_name}" BACKEND_PYPROJECT_PATH="${BACKEND_DIR}/pyproject.toml" DESTINATION_PATH="${destination_path}" "${PYTHON_BIN}" - <<'PY'
 from __future__ import annotations
 
 import os
@@ -106,7 +115,7 @@ PY
 }
 
 read_wsl_rocm_extra_index_url() {
-  BACKEND_PYPROJECT_PATH="${BACKEND_DIR}/pyproject.toml" python3 - <<'PY'
+  BACKEND_PYPROJECT_PATH="${BACKEND_DIR}/pyproject.toml" "${PYTHON_BIN}" - <<'PY'
 from __future__ import annotations
 
 import os
@@ -123,7 +132,7 @@ normalize_requirements_file() {
   local raw_path="$1"
   local normalized_path="$2"
 
-  RAW_EXPORT_PATH="${raw_path}" NORMALIZED_EXPORT_PATH="${normalized_path}" python3 - <<'PY'
+  RAW_EXPORT_PATH="${raw_path}" NORMALIZED_EXPORT_PATH="${normalized_path}" "${PYTHON_BIN}" - <<'PY'
 from __future__ import annotations
 
 import os
@@ -154,7 +163,7 @@ write_constraints_file() {
   local source_path="$1"
   local destination_path="$2"
 
-  SOURCE_REQUIREMENTS_PATH="${source_path}" DESTINATION_PATH="${destination_path}" python3 - <<'PY'
+  SOURCE_REQUIREMENTS_PATH="${source_path}" DESTINATION_PATH="${destination_path}" "${PYTHON_BIN}" - <<'PY'
 from __future__ import annotations
 
 import os

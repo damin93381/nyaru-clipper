@@ -47,19 +47,6 @@ def _run_openapi_export(output_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _run_workstation_contract_check() -> subprocess.CompletedProcess[str]:
-    environment = os.environ.copy()
-    environment["BACKEND_PYTHON"] = sys.executable
-    return subprocess.run(
-        ["pnpm", "api:check"],
-        cwd=WEB_DIR,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
 def _read_requirement_entries(path: Path) -> list[str]:
     return [
         line
@@ -129,6 +116,28 @@ def test_export_script_check_detects_stale_requirements_file(tmp_path) -> None:
     assert "stale" in (stale_result.stderr or stale_result.stdout).lower()
 
 
+def test_export_script_prefers_the_backend_virtualenv_python_over_system_python(tmp_path) -> None:
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_python3 = fake_bin / "python3"
+    fake_python3.write_text("#!/usr/bin/env bash\necho unexpected-system-python >&2\nexit 77\n", encoding="utf-8")
+    fake_python3.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
+
+    result = subprocess.run(
+        [str(EXPORT_SCRIPT), "--check"],
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_openapi_export_is_deterministic_and_contains_workstation_task_contract(tmp_path) -> None:
     first_output_path = tmp_path / "first-openapi.json"
     second_output_path = tmp_path / "second-openapi.json"
@@ -144,10 +153,13 @@ def test_openapi_export_is_deterministic_and_contains_workstation_task_contract(
     assert "/api/v2/tasks" in schema["paths"]
 
 
-def test_checked_in_workstation_contract_has_no_generation_drift() -> None:
-    result = _run_workstation_contract_check()
+def test_checked_in_workstation_contract_matches_the_backend_openapi_export(tmp_path) -> None:
+    output_path = tmp_path / "workstation-openapi.json"
+
+    result = _run_openapi_export(output_path)
 
     assert result.returncode == 0, result.stderr or result.stdout
+    assert output_path.read_bytes() == (WEB_DIR / "openapi.json").read_bytes()
 
 
 def test_checked_in_linux_cuda_profile_artifact_contains_cuda_runtime_requirements() -> None:

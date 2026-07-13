@@ -103,6 +103,7 @@ test("recovers a failed stage and exports a confirmed clip", async ({ page }) =>
 
   await page.goto(`/workstation/tasks/${taskId}`);
   await expect(page.getByRole("heading", { name: "失败恢复与导出验证" })).toBeVisible();
+  await expect(page.getByText("任务需要恢复")).toHaveCSS("white-space", "nowrap");
   await page.getByRole("button", { name: "从翻译重新尝试" }).click();
   await expect.poll(() => retryBody).toEqual({ stage_name: "translation" });
   await page.getByRole("button", { name: "确认导出" }).click();
