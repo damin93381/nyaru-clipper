@@ -151,12 +151,8 @@ test("rolls back a conflicting queue reorder to the authoritative order", async 
   await expect.poll(() => reorderBody).toEqual({ expected_revision: 7, ordered_task_ids: ["task-second", "task-first", "task-third"] });
   await expect(page.getByText("队列已在其他操作中变化，已恢复最新顺序。")).toHaveAttribute("role", "status");
   await expect(page.getByText("队列版本 8")).toBeVisible();
-  await expect(page.getByRole("row", { name: /task-third/ })).toBeVisible();
-  await expect(page.getByRole("row", { name: /task-first/ })).toBeVisible();
-  await expect(page.getByRole("row", { name: /task-second/ })).toBeVisible();
-  expect(await page.getByRole("row").allTextContents()).toEqual(expect.arrayContaining([
-    expect.stringMatching(/task-third/),
-    expect.stringMatching(/task-first/),
-    expect.stringMatching(/task-second/),
-  ]));
+  const authoritativeOrder = (await page.getByRole("row").allTextContents())
+    .filter((text) => /task-(third|first|second)/.test(text))
+    .map((text) => text.match(/task-(third|first|second)/)?.[0]);
+  expect(authoritativeOrder).toEqual(["task-third", "task-first", "task-second"]);
 });

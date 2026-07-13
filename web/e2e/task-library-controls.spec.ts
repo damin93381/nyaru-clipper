@@ -66,7 +66,7 @@ test("keeps filter checkboxes in the workstation's light paper color scheme", as
 
   await page.goto("/workstation");
 
-  const workstation = page.locator(".ny-workstation");
+  const workstation = page.getByRole("main");
   const running = page.getByRole("checkbox", { name: "运行中" });
   await expect(workstation).toHaveCSS("color-scheme", "light");
   await expect(running).toHaveCSS("appearance", "none");

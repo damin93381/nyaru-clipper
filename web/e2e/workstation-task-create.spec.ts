@@ -1,13 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-test("creates an inspected Bilibili task through the production drawer", async ({ page }) => {
+test("creates an inspected Bilibili task and exposes it in the ordered queue", async ({ page }) => {
   let createBody: unknown;
+  let created = false;
   await page.route("http://127.0.0.1:8000/api/**", async (route) => {
     const request = route.request();
     const method = request.method();
     const pathname = new URL(request.url()).pathname;
     if (pathname === "/api/v2/tasks" && method === "POST") {
       createBody = route.request().postDataJSON();
+      created = true;
       await route.fulfill({ json: { priority: 4, profile_id: "standard", status: "pending", task_id: "task-e2e-created" }, status: 201 });
       return;
     }
@@ -28,7 +30,9 @@ test("creates an inspected Bilibili task through the production drawer", async (
       return;
     }
     if (pathname === "/api/v2/queue") {
-      await route.fulfill({ json: { active: null, paused: [], queued: [], revision: 1 } });
+      await route.fulfill({ json: created
+        ? { active: null, paused: [], queued: [{ position: 1, priority: 4, state: "queued", task_id: "task-e2e-created" }], revision: 2 }
+        : { active: null, paused: [], queued: [], revision: 1 } });
       return;
     }
     await route.fulfill({ json: {} });
@@ -47,6 +51,9 @@ test("creates an inspected Bilibili task through the production drawer", async (
 
   await expect(page).toHaveURL(/\/workstation\/tasks\/task-e2e-created$/);
   expect(createBody).toEqual({ priority: 4, profile_id: "standard", source: { kind: "bilibili", url: "https://www.bilibili.com/video/BV1e2ecreate" } });
+  await page.goto("/workstation/queue");
+  await expect(page.getByText("队列版本 2")).toBeVisible();
+  await expect(page.getByRole("row", { name: /task-e2e-created/ })).toBeVisible();
 });
 
 test("creates a referenced local-file task from a trusted root", async ({ page }) => {
