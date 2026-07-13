@@ -183,6 +183,22 @@ describe("TaskOverviewPage", () => {
     expect(phrases).not.toContain(title);
   });
 
+  it.each([
+    ["映像の字幕レビューを確認して映像の場面", "を確認して"],
+    ["映像のAPIレビューを確認されて映像の場面", "を確認されて"],
+    ["映像のAPIレビューを確認できた映像の場面", "を確認できた"],
+  ])("keeps the complete predicate chain atomic at the title length boundary in %s", async (title, predicateChain) => {
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({ ...overview, title });
+
+    renderOverview();
+
+    const heading = await screen.findByRole("heading", { name: title });
+    const phrases = Array.from(heading.querySelectorAll(".ny-task-overview__title-phrase"), (phrase) => phrase.textContent);
+    expect(phrases).toContain(predicateChain);
+    expect(phrases).toContain("映像の場面");
+    expect(phrases).not.toContain("して");
+  });
+
   it("keeps non-CJK titles readable when the server runtime lacks Intl.Segmenter", async () => {
     const title = "very-long-operator-supplied-title-without-a-segmenter";
     const segmenter = Reflect.get(Intl, "Segmenter");

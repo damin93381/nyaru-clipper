@@ -135,7 +135,7 @@ test("moves a Japanese particle with its content at the twelve-character boundar
 });
 
 test("starts a new title phrase after a split Japanese predicate", async ({ page }) => {
-  const title = "字幕を確認して映像の場面";
+  const title = "映像の字幕レビューを確認して映像の場面";
   const predicateOverview = { ...taskOverview, title };
   await page.setViewportSize({ height: 900, width: 1280 });
   await page.route("http://127.0.0.1:8000/api/**", async (route) => {
@@ -150,10 +150,10 @@ test("starts a new title phrase after a split Japanese predicate", async ({ page
   await page.goto("/workstation/tasks/task-e2e-overview");
 
   const heading = page.getByRole("heading", { name: title });
-  const predicatePhrase = heading.locator(".ny-task-overview__title-phrase", { hasText: "字幕を確認して" });
+  const predicatePhrase = heading.locator(".ny-task-overview__title-phrase", { hasText: "を確認して" });
   const followingPhrase = heading.locator(".ny-task-overview__title-phrase", { hasText: "映像の場面" });
   await expect(heading).toBeVisible();
-  await expect(predicatePhrase).toHaveText("字幕を確認して");
+  await expect(predicatePhrase).toHaveText("を確認して");
   await expect(followingPhrase).toHaveText("映像の場面");
   expect(await predicatePhrase.evaluate((node) => {
     const range = document.createRange();

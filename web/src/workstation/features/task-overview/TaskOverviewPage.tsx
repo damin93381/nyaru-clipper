@@ -28,10 +28,22 @@ const titleContentToken = /[\p{L}\p{N}]/u;
 const titlePostposition = /^(?:的|地|得|中|中的|里|上|下|内|外|前|后|间|时|の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも|의|은|는|이|가|을|를|에|에서|로|으로|와|과|도|만|까지|부터)$/u;
 const japaneseParticle = /^(?:の|に|へ|を|が|は|も|と|で|や|か|ね|よ|から|まで|より|など|だけ|ほど|くらい|ので|のに|には|では|とは|にも)$/u;
 const japanesePredicateEnding = /(?:する|した|して|される|された|されて|ある|いる|なる|なった|できる|できた|ない|たい)$/u;
+const japaneseSplitPredicateChains = [["さ", "れ", "て"], ["さ", "れ", "た"], ["でき", "た"], ["でき", "る"], ["なっ", "た"], ["し", "て"], ["し", "た"]] as const;
 const titlePhraseLengthLimit = 12;
 
 function isTitleSegmenterConstructor(value: unknown): value is TitleSegmenterConstructor {
   return typeof value === "function";
+}
+
+function japanesePredicateChainLength(segments: readonly string[], startIndex: number): number {
+  const directPredicate = segments[startIndex];
+  if (directPredicate !== undefined && japanesePredicateEnding.test(directPredicate)) return 1;
+  const predicateChain = japaneseSplitPredicateChains.find((chain) => chain.every((token, offset) => segments[startIndex + offset] === token));
+  return predicateChain === undefined ? 0 : predicateChain.length;
+}
+
+function appendJapanesePredicateChain(unit: string, segments: readonly string[], startIndex: number, predicateLength: number): string {
+  return predicateLength === 0 ? unit : `${unit}${segments.slice(startIndex, startIndex + predicateLength).join("")}`;
 }
 
 function groupedJapaneseTitlePhrases(segments: readonly string[]): string[] {
@@ -63,14 +75,13 @@ function groupedJapaneseTitlePhrases(segments: readonly string[]): string[] {
       }
       unit = `${segment}${nextSegment}`;
       index += 1;
-      const predicateSegment = segments[index + 1];
-      if (predicateSegment !== undefined && japanesePredicateEnding.test(predicateSegment)) {
-        unit = `${unit}${predicateSegment}`;
-        index += 1;
-      }
-    } else if (nextSegment !== undefined && japanesePredicateEnding.test(nextSegment)) {
-      unit = `${segment}${nextSegment}`;
-      index += 1;
+      const predicateLength = japanesePredicateChainLength(segments, index + 1);
+      unit = appendJapanesePredicateChain(unit, segments, index + 1, predicateLength);
+      index += predicateLength;
+    } else {
+      const predicateLength = japanesePredicateChainLength(segments, index + 1);
+      unit = appendJapanesePredicateChain(unit, segments, index + 1, predicateLength);
+      index += predicateLength;
     }
 
     if (phrase === "" || (!phraseEndsWithPredicate && phrase.length + unit.length <= titlePhraseLengthLimit)) {
