@@ -344,7 +344,7 @@
 .ny-task-overview .subtitle-table__scroll { max-inline-size: 100%; overflow-x: auto; border: 1px solid var(--ny-border); background: var(--ny-surface); }
 .ny-task-overview .subtitle-table__scroll:focus-visible { outline: 3px solid var(--ny-focus); outline-offset: var(--ny-space-1); }
 .ny-task-overview .subtitle-table { min-inline-size: 45rem; padding: var(--ny-space-4); }
-.ny-task-overview .subtitle-table__header, .ny-task-overview .subtitle-row { display: grid; grid-template-columns: 10rem minmax(13rem, 1fr) minmax(21rem, 1.5fr); gap: var(--ny-space-3); align-items: start; }
+.ny-task-overview .subtitle-table__header, .ny-task-overview .subtitle-row { display: grid; grid-template-columns: 10rem minmax(17rem, 1.15fr) minmax(21rem, 1.5fr); gap: var(--ny-space-3); align-items: start; }
 .ny-task-overview .subtitle-table__header { padding-bottom: var(--ny-space-3); border-bottom: 1px solid var(--ny-border); color: var(--ny-ink-muted); font-size: var(--ny-font-caption); font-weight: 700; }
 .ny-task-overview .subtitle-row { padding: var(--ny-space-3) 0; border-bottom: 1px solid var(--ny-border); }
 .ny-task-overview .subtitle-row:last-child { border-bottom: 0; }
@@ -382,6 +382,7 @@
 .ny-task-create__preview p { margin: 0; }
 .ny-task-create__preview h3 { font-family: var(--ny-font-serif); font-size: var(--ny-font-section); line-height: var(--ny-line-tight); }
 .ny-task-create__preview p:not(.ny-workstation__eyebrow) { color: var(--ny-ink-muted); font-size: var(--ny-font-body); line-height: var(--ny-line-body); }
+.ny-task-create__copy-phrase { white-space: nowrap; }
 .ny-task-create__technical { overflow-wrap: anywhere; font-family: var(--ny-font-mono); font-size: var(--ny-font-caption) !important; }
 .ny-task-create__radio-actions [role="radio"][aria-checked="true"] { color: var(--ny-surface); border-color: var(--ny-accent); background: var(--ny-accent); }
 .ny-task-create__footer-error { margin: 0; padding: var(--ny-space-3); border-top: 1px solid color-mix(in srgb, var(--ny-danger) 35%, var(--ny-border)); color: var(--ny-danger); background: color-mix(in srgb, var(--ny-danger) 8%, var(--ny-surface)); font-size: var(--ny-font-caption); line-height: var(--ny-line-body); }

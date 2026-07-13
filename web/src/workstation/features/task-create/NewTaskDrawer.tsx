@@ -131,7 +131,7 @@ function messageFor(error: unknown): string {
 }
 
 function Preview({ source, inspection }: { readonly inspection: BilibiliInspection | null; readonly source: DraftSource }): ReactNode {
-  if (source.kind === "local") return <section className="ny-task-create__preview" aria-label="已选本地来源"><p className="ny-workstation__eyebrow">本地文件</p><h3>{source.name}</h3><p>仅保存受信任目录中的相对位置；请选择后续使用原文件或复制。</p></section>;
+  if (source.kind === "local") return <section className="ny-task-create__preview" aria-label="已选本地来源"><p className="ny-workstation__eyebrow">本地文件</p><h3>{source.name}</h3><p>仅保存受信任目录中的相对位置；请选择后续<span className="ny-task-create__copy-phrase">使用原文件或复制。</span></p></section>;
   if (inspection === null) return null;
   return <section className="ny-task-create__preview" aria-label="Bilibili 来源预览"><p className="ny-workstation__eyebrow">检查完成</p><h3>{inspection.title ?? inspection.source_video_id}</h3><p>{inspection.uploader ?? "未提供上传者"} · {inspection.duration_seconds === null ? "时长待确认" : `${Math.round(inspection.duration_seconds)} 秒`}</p><p className="ny-task-create__technical">{inspection.normalized_url}</p></section>;
 }

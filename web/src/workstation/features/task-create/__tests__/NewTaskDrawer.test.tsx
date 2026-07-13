@@ -116,6 +116,7 @@ describe("NewTaskDrawer", () => {
     fireEvent.click(await screen.findByRole("button", { name: "媒体导入" }));
     expect(await screen.findByRole("button", { name: "summer.mp4" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "summer.mp4" }));
+    expect(screen.getByText("使用原文件或复制。")).toHaveClass("ny-task-create__copy-phrase");
     fireEvent.click(screen.getByRole("radio", { name: "复制到任务存储" }));
     fireEvent.click(screen.getByRole("button", { name: "继续设置" }));
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));

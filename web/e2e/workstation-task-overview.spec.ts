@@ -42,8 +42,8 @@ test("renders the task overview and selected-stage inspector in production Chrom
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/v2/tasks/task-e2e-overview") return route.fulfill({ json: taskOverview });
-    if (pathname.endsWith("asr-segments.json")) return route.fulfill({ json: { segments: [{ id: "seg-0001", start_seconds: 0, end_seconds: 1.5, text: "你好" }] } });
-    if (pathname.endsWith("subtitles.zh-ja.json")) return route.fulfill({ json: { segments: [{ id: "seg-0001", start_seconds: 0, end_seconds: 1.5, text: "你好", translated_text: "こんにちは" }] } });
+    if (pathname.endsWith("asr-segments.json")) return route.fulfill({ json: { segments: [{ id: "seg-0001", start_seconds: 0, end_seconds: 1.5, text: "你好，欢迎来到单用户剪辑工作站。" }] } });
+    if (pathname.endsWith("subtitles.zh-ja.json")) return route.fulfill({ json: { segments: [{ id: "seg-0001", start_seconds: 0, end_seconds: 1.5, text: "你好，欢迎来到单用户剪辑工作站。", translated_text: "こんにちは" }] } });
     if (pathname.endsWith("highlight-candidates.json")) return route.fulfill({ json: { candidate_count: 0, candidates: [], no_candidates: "暂无高光候选" } });
     return route.fulfill({ json: {} });
   });
@@ -54,7 +54,13 @@ test("renders the task overview and selected-stage inspector in production Chrom
   await expect(page.getByText("校准字幕时间轴 · 4 / 5")).toBeVisible();
   await expect(page.getByRole("button", { name: /语音转写/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("complementary", { name: "上下文检查器" }).getByText("已写入可公开的转写进度摘要")).toBeVisible();
-  await expect(page.getByText("你好")).toBeVisible();
+  const sourceSubtitle = page.getByText("你好，欢迎来到单用户剪辑工作站。");
+  await expect(sourceSubtitle).toBeVisible();
+  expect(await sourceSubtitle.evaluate((node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.getClientRects().length;
+  })).toBe(1);
   await expect(page.getByText("こんにちは")).toBeVisible();
   await page.screenshot({ path: "/tmp/nyaru-task13-evidence/overview-running.png", fullPage: true });
 
