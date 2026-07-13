@@ -55,3 +55,25 @@ test("keeps the task-selection hit target large while rendering a compact paper-
   await titleSort.click();
   await expect(page.getByRole("columnheader", { exact: true, name: "任务" })).toHaveAttribute("aria-sort", "ascending");
 });
+
+test("keeps filter checkboxes in the workstation's light paper color scheme", async ({ page }) => {
+  await page.route("**/api/v2/tasks/summary", async (route) => {
+    await route.fulfill({ json: { active: 1, archived: 0, failed: 0, queued: 0, review_required: 0, storage_bytes: 4_096 } });
+  });
+  await page.route(/\/api\/v2\/tasks(?:\?.*)?$/, async (route) => {
+    await route.fulfill({ json: { items: [listItem], page: 1, page_count: 1, page_size: 50, total: 1 } });
+  });
+
+  await page.goto("/workstation");
+
+  const workstation = page.locator(".ny-workstation");
+  const running = page.getByRole("checkbox", { name: "运行中" });
+  await expect(workstation).toHaveCSS("color-scheme", "light");
+  await expect(running).toHaveCSS("appearance", "none");
+  await expect(running).toHaveCSS("background-color", "rgb(253, 250, 243)");
+  await expect(running).toHaveCSS("border-top-color", "rgb(201, 192, 176)");
+  await running.click();
+  await expect(running).toBeChecked();
+  await expect(running).toHaveCSS("background-color", "rgb(164, 60, 46)");
+  await expect(running).toHaveCSS("border-top-color", "rgb(164, 60, 46)");
+});

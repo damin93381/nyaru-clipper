@@ -53,7 +53,14 @@ describe("TaskInspector", () => {
     const { TaskInspector } = await import("../TaskInspector");
     renderWorkstation(<TaskInspector taskId="task-42" />);
 
-    expect((await screen.findByLabelText("任务标题") as HTMLInputElement).value.length).toBeGreaterThan(120);
+    const titleInput = await screen.findByLabelText("任务标题");
+    expect((titleInput as HTMLInputElement).value.length).toBeGreaterThan(120);
+    expect(titleInput).toHaveClass("ny-task-inspector__title-input");
+    expect(titleInput).toHaveAttribute("title", longTitle);
+    fireEvent.focus(titleInput);
+    fireEvent.change(titleInput, { target: { value: `${longTitle}（已编辑）` } });
+    expect(titleInput).toHaveValue(`${longTitle}（已编辑）`);
+    fireEvent.change(titleInput, { target: { value: longTitle } });
     expect(screen.getByRole("heading", { level: 2 })).toHaveClass("ny-task-inspector__heading");
     expect(screen.getByRole("heading", { level: 2 })).toHaveAttribute("title", longTitle);
     fireEvent.change(screen.getByLabelText("标签（用中文逗号分隔）"), { target: { value: "夏季，新标签" } });

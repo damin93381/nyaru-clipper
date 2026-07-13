@@ -242,14 +242,15 @@ describe("TaskLibraryPage", () => {
     const row = await screen.findByRole("row", { name: new RegExp(taskTitle.slice(0, 24)) });
     fireEvent.click(row);
     fireEvent.click(screen.getByRole("button", { name: "标记选中任务" }));
-    expect(await screen.findByText("保留未成功任务的选择状态")).toHaveClass("ny-overlay__description-phrase");
+    expect(await screen.findByText("新标签会替换选中任务的现有标签，并保留未成功任务的选择状态。")).toHaveClass("ny-overlay__description-phrase");
     fireEvent.change(await screen.findByLabelText("批量标签"), { target: { value: "精选，待复核" } });
     fireEvent.click(screen.getByRole("button", { name: "确认标记" }));
     await waitFor(() => expect(bulkBodies).toContainEqual({ operation: "set_tags", task_ids: ["task-42"], tags: ["精选", "待复核"] }));
     expect(await screen.findByRole("status")).toHaveTextContent("task-42：仍在处理中");
 
     fireEvent.click(screen.getByRole("button", { name: "重新排队选中任务" }));
-    expect(await screen.findByText("保持选择状态")).toHaveClass("ny-overlay__description-phrase");
+    expect(await screen.findByText("终止的任务会从中断阶段重新进入队列；")).toHaveClass("ny-overlay__description-phrase");
+    expect(screen.getByText("未成功任务会保持选择状态。")).toHaveClass("ny-overlay__description-phrase");
     fireEvent.click(await screen.findByRole("button", { name: "确认重新排队" }));
     await waitFor(() => expect(bulkBodies).toContainEqual({ operation: "requeue", task_ids: ["task-42"] }));
   });

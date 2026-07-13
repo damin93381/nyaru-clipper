@@ -74,7 +74,7 @@ export function TaskInspector({ taskId }: TaskInspectorProps): ReactNode {
         <div><dt>存储</dt><dd>{formatStorage(task.storage_bytes)}</dd></div>
       </dl>
       <label className="ny-field" htmlFor="task-inspector-title">任务标题
-        <input className="ny-input" id="task-inspector-title" onChange={(event) => setTitle(event.target.value)} value={title} />
+        <input className="ny-input ny-task-inspector__title-input" id="task-inspector-title" onChange={(event) => setTitle(event.target.value)} title={title} value={title} />
       </label>
       <label className="ny-field" htmlFor="task-inspector-tags">标签（用中文逗号分隔）
         <input className="ny-input" id="task-inspector-tags" onChange={(event) => setTags(event.target.value)} value={tags} />

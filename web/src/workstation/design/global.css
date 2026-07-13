@@ -8,6 +8,7 @@
 .ny-workstation {
   min-width: 1280px;
   min-height: 100dvh;
+  color-scheme: light;
   color: var(--ny-ink);
   font-family: var(--ny-font-sans);
   background-color: var(--ny-canvas);
@@ -15,10 +16,6 @@
     linear-gradient(color-mix(in srgb, var(--ny-border) 20%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--ny-border) 20%, transparent) 1px, transparent 1px);
   background-size: var(--ny-space-4) var(--ny-space-4);
-}
-
-.ny-workstation:has(.ny-showcase) {
-  color-scheme: light;
 }
 
 .ny-workstation button,
