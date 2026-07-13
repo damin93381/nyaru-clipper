@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
 from typing import Any, Callable
 
 from sqlmodel import Session, select
@@ -95,6 +96,33 @@ def _execute_ingest(session: Session, task_id: str):
             summary="Referenced local source video",
         )
         return local_source
+
+    if media_source is not None and media_source.kind == "local" and media_source.import_mode == "copy":
+        local_source = resolve_persisted_local_media_source(media_source.metadata_json)
+        copy_path = ensure_task_dirs(task_id)["raw"] / f"source{local_source.path.suffix.casefold()}"
+        shutil.copy2(local_source.path, copy_path)
+        persist_artifact_metadata(
+            session,
+            task_id=task_id,
+            stage_name="ingest",
+            kind="source_video",
+            path=copy_path,
+            metadata={
+                "import_mode": "copy",
+                "relative_path": local_source.relative_path,
+                "root_id": local_source.root_id,
+            },
+        )
+        from app.services.pipeline_support import set_stage_status
+
+        set_stage_status(
+            session,
+            task_id=task_id,
+            stage_name="ingest",
+            status="success",
+            summary="Copied local source video",
+        )
+        return copy_path
 
     result = download_bilibili_vod(session, task_id)
     source_video_id = str(result.source_metadata.get("source_video_id") or "").strip() or None

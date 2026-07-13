@@ -116,6 +116,12 @@ The first delivery supports desktop widths from 1280 px. Product screens are not
 - **States:** closed, open, focus-visible, destructive confirmation where appropriate.
 - **Accessibility:** Radix manages focus trapping, Escape close, menu roles, tooltip relationship, and live notification semantics; no inactive placeholder action is rendered.
 
+### Inspected task creation flow
+
+- **Structure:** the global Radix drawer opens from the main command bar and advances source selection → verified source preview → Standard profile and priority. Bilibili creation requires a metadata inspection; local selection is limited to opaque trusted-root IDs and relative catalog paths.
+- **States:** unselected, source validation failure, inspection loading/preview, local reference or task-owned copy, field-mapped server error, submitting, and dirty-close confirmation.
+- **Accessibility:** source choices are labelled buttons, catalog entries remain keyboard-operable, import modes use a radio relationship, and server errors remain next to their inputs while the operator's values stay intact.
+
 ### Loading, empty, disconnected, and failure panels
 
 - **Structure:** status icon, concise plain-language title, reason, and a real recovery action when one exists.

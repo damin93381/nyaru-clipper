@@ -52,7 +52,7 @@ class LocalTaskSource(WorkstationSchema):
     kind: Literal["local"]
     root_id: str = Field(min_length=1)
     relative_path: str = Field(min_length=1)
-    import_mode: Literal["reference"]
+    import_mode: Literal["reference", "copy"]
 
 
 TaskSource: TypeAlias = Annotated[BilibiliTaskSource | LocalTaskSource, Field(discriminator="kind")]

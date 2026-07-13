@@ -110,6 +110,92 @@ def test_v2_task_creation_revalidates_local_source_before_persisting_reference(c
         assert source.import_mode == "reference"
 
 
+def test_v2_local_copy_task_creates_a_managed_task_copy_before_media_preparation(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    # Given: a trusted local source selected for a task-owned copy.
+    payload = {
+        "source": {
+            "kind": "local",
+            "root_id": _root_id(client),
+            "relative_path": "vod/example.mp4",
+            "import_mode": "copy",
+        },
+        "profile_id": "standard",
+        "priority": 0,
+    }
+
+    # When: the source is created and the canonical ingest stage runs.
+    create_response = client.post("/api/v2/tasks", json=payload)
+
+    # Then: creation accepts the mode and ingest copies from the trusted root without using the downloader.
+    assert create_response.status_code == 201
+    task_id = create_response.json()["task_id"]
+
+    import app.services.task_runner as task_runner
+
+    def downloader_must_not_run(*args, **kwargs) -> None:
+        raise AssertionError("local copy ingestion must not call the Bilibili downloader")
+
+    monkeypatch.setattr(task_runner, "download_bilibili_vod", downloader_must_not_run)
+    from app.db import session_scope
+    from app.models import Artifact, MediaSource
+
+    with session_scope() as session:
+        task_runner._execute_ingest(session, task_id)
+        source = session.exec(select(MediaSource).where(MediaSource.task_id == task_id)).one()
+        artifact = session.exec(
+            select(Artifact).where(Artifact.task_id == task_id, Artifact.stage_name == "ingest", Artifact.kind == "source_video")
+        ).one()
+        import_mode = source.import_mode
+        artifact_path = artifact.path
+        artifact_metadata = artifact.metadata_json
+
+    assert import_mode == "copy"
+    copied_path = Path(artifact_path)
+    assert copied_path.name == "source.mp4"
+    assert copied_path.read_bytes() == b"fixture-media"
+    assert str(client.local_root) not in artifact_metadata
+
+
+def test_v2_local_copy_task_fails_ingest_with_a_safe_diagnostic_if_the_source_is_removed(
+    client: TestClient,
+) -> None:
+    # Given: a valid local-copy task whose selected source disappears before the worker claims it.
+    payload = {
+        "source": {
+            "kind": "local",
+            "root_id": _root_id(client),
+            "relative_path": "vod/example.mp4",
+            "import_mode": "copy",
+        },
+        "profile_id": "standard",
+        "priority": 0,
+    }
+    create_response = client.post("/api/v2/tasks", json=payload)
+    task_id = create_response.json()["task_id"]
+    (client.local_root / "vod" / "example.mp4").unlink()
+
+    # When: the pipeline reaches ingest after the source has left its trusted root.
+    import app.services.task_runner as task_runner
+
+    from app.db import session_scope
+    from app.models import TaskStage
+    from app.services.source_catalog import SourceCatalogError
+
+    with session_scope() as session:
+        with pytest.raises(SourceCatalogError, match="Local path does not exist"):
+            task_runner.run_task_pipeline(session, task_id)
+        ingest = session.exec(select(TaskStage).where(TaskStage.task_id == task_id, TaskStage.name == "ingest")).one()
+        summary = ingest.summary
+
+    # Then: the failure is actionable but does not disclose the configured host path.
+    assert create_response.status_code == 201
+    assert summary == "Local path does not exist"
+    assert str(client.local_root) not in summary
+
+
 def test_v2_local_reference_task_keeps_trusted_root_paths_out_of_persisted_and_returned_data(
     client: TestClient,
     monkeypatch,

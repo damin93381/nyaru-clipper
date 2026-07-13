@@ -758,9 +758,9 @@ export interface components {
         LocalTaskSource: {
             /**
              * Import Mode
-             * @constant
+             * @enum {string}
              */
-            import_mode: "reference";
+            import_mode: "reference" | "copy";
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}

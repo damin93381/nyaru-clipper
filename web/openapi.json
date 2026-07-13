@@ -673,7 +673,10 @@
         "description": "A selected supported file within a configured local import root.",
         "properties": {
           "import_mode": {
-            "const": "reference",
+            "enum": [
+              "reference",
+              "copy"
+            ],
             "title": "Import Mode",
             "type": "string"
           },

@@ -19,7 +19,8 @@
 }
 
 .ny-workstation button,
-.ny-workstation input {
+.ny-workstation input,
+.ny-workstation select {
   font: inherit;
 }
 
