@@ -1,6 +1,7 @@
 import { Check, CircleDashed, CircleX, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { getExecutionProgressLabel } from "../../../lib/copy/glossary";
 import { CANONICAL_STAGES, formatStageLabel } from "../../../lib/types";
 import type { WorkstationTaskOverview } from "./api";
 
@@ -33,22 +34,20 @@ function StageIcon({ tone }: { readonly tone: StageTone }): ReactNode {
   }
 }
 
-function phaseLabel(phase: string): string {
-  switch (phase) {
-    case "model_load": return "加载模型";
-    case "vad": return "检测语音";
-    case "transcribe": return "转写音频";
-    case "align": return "校准字幕时间轴";
-    case "persist": return "保存结果";
-    default: return phase;
-  }
-}
-
 export function StageRail({ executionProgress, onSelectStage, selectedStage, stages }: StageRailProps): ReactNode {
   const stagesByName = new Map(stages.map((stage) => [stage.name, stage]));
+  const selectedStageSummary = selectedStage === null
+    ? null
+    : stagesByName.get(selectedStage)?.summary ?? null;
   const progressLabel = executionProgress === null
     ? null
-    : `${phaseLabel(executionProgress.current_phase)} · ${executionProgress.phase_index} / ${executionProgress.phase_count}`;
+    : getExecutionProgressLabel({
+      phase: executionProgress.current_phase,
+      phaseCount: executionProgress.phase_count,
+      phaseIndex: executionProgress.phase_index,
+      stageName: executionProgress.stage_name,
+    });
+  const stageMessage = executionProgress?.latest_message ?? selectedStageSummary;
 
   return (
     <section className="ny-overview__stage-panel" aria-labelledby="task-stage-rail-title">
@@ -74,7 +73,7 @@ export function StageRail({ executionProgress, onSelectStage, selectedStage, sta
           );
         })}
       </ol>
-      {executionProgress?.latest_message ? <p className="ny-overview__stage-message" role="status">{executionProgress.latest_message}</p> : null}
+      {stageMessage ? <p className="ny-overview__stage-message" role="status">{stageMessage}</p> : null}
     </section>
   );
 }

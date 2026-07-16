@@ -39,7 +39,8 @@
               "ready",
               "missing",
               "failed",
-              "not_ready"
+              "not_ready",
+              "not_applicable"
             ],
             "title": "Status",
             "type": "string"
@@ -273,6 +274,11 @@
         "additionalProperties": false,
         "description": "The v2 source, profile, and scheduling request for one new task.",
         "properties": {
+          "highlight_filtering_enabled": {
+            "default": false,
+            "title": "Highlight Filtering Enabled",
+            "type": "boolean"
+          },
           "priority": {
             "default": 0,
             "title": "Priority",
@@ -312,6 +318,10 @@
       "CreateWorkstationTaskResponse": {
         "description": "The accepted v2 task identity and selected scheduling options.",
         "properties": {
+          "highlight_filtering_enabled": {
+            "title": "Highlight Filtering Enabled",
+            "type": "boolean"
+          },
           "priority": {
             "title": "Priority",
             "type": "integer"
@@ -335,6 +345,7 @@
           "task_id",
           "profile_id",
           "priority",
+          "highlight_filtering_enabled",
           "status"
         ],
         "title": "CreateWorkstationTaskResponse",
@@ -1284,6 +1295,10 @@
               }
             ]
           },
+          "highlight_filtering_enabled": {
+            "title": "Highlight Filtering Enabled",
+            "type": "boolean"
+          },
           "pipeline_run_id": {
             "anyOf": [
               {
@@ -1394,6 +1409,7 @@
           "created_at",
           "updated_at",
           "archived_at",
+          "highlight_filtering_enabled",
           "pipeline_run_id",
           "stages",
           "execution_progress",
@@ -2634,7 +2650,8 @@
                     "ready",
                     "missing",
                     "failed",
-                    "not_ready"
+                    "not_ready",
+                    "not_applicable"
                   ],
                   "type": "string"
                 },

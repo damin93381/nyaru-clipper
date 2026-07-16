@@ -145,6 +145,9 @@ describe("TaskLibraryPage", () => {
 
     fireEvent.change(screen.getByLabelText("产物状态"), { target: { value: "failed" } });
     await waitFor(() => expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("readiness")).toBe("failed"));
+
+    fireEvent.change(screen.getByLabelText("产物状态"), { target: { value: "not_applicable" } });
+    await waitFor(() => expect(latestTaskPageRequest(requestedUrls)?.searchParams.get("readiness")).toBe("not_applicable"));
   });
 
   it("requests the next page from the server", async () => {

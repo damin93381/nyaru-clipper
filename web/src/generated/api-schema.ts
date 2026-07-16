@@ -491,7 +491,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "ready" | "missing" | "failed" | "not_ready";
+            status: "ready" | "missing" | "failed" | "not_ready" | "not_applicable";
         };
         /**
          * BilibiliInspectRequest
@@ -588,6 +588,11 @@ export interface components {
          */
         CreateWorkstationTaskRequest: {
             /**
+             * Highlight Filtering Enabled
+             * @default false
+             */
+            highlight_filtering_enabled: boolean;
+            /**
              * Priority
              * @default 0
              */
@@ -605,6 +610,8 @@ export interface components {
          * @description The accepted v2 task identity and selected scheduling options.
          */
         CreateWorkstationTaskResponse: {
+            /** Highlight Filtering Enabled */
+            highlight_filtering_enabled: boolean;
             /** Priority */
             priority: number;
             /**
@@ -1025,6 +1032,8 @@ export interface components {
             /** Current Stage */
             current_stage: string | null;
             execution_progress: components["schemas"]["ExecutionProgressOverview"] | null;
+            /** Highlight Filtering Enabled */
+            highlight_filtering_enabled: boolean;
             /** Pipeline Run Id */
             pipeline_run_id: string | null;
             /** Progress Percent */
@@ -1784,7 +1793,7 @@ export interface operations {
                 tag?: string | null;
                 updated_from?: string | null;
                 updated_to?: string | null;
-                readiness?: ("ready" | "missing" | "failed" | "not_ready") | null;
+                readiness?: ("ready" | "missing" | "failed" | "not_ready" | "not_applicable") | null;
                 sort?: "updated_at" | "created_at" | "title" | "storage_bytes";
                 direction?: "asc" | "desc";
                 page?: number;

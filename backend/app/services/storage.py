@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.models import Artifact, Task
 from app.paths import get_data_dir
@@ -109,3 +109,37 @@ def persist_artifact_metadata(
         },
     )
     return artifact
+
+
+def invalidate_translation_artifacts(session: Session, *, task_id: str) -> None:
+    """Remove retry-invalid translation outputs while preserving reusable ASR and chunk caches."""
+    artifacts = session.exec(
+        select(Artifact).where(Artifact.task_id == task_id).where(Artifact.stage_name == "translation")
+    ).all()
+    for artifact in artifacts:
+        try:
+            artifact_path = resolve_task_artifact_path(task_id, artifact.path)
+        except ValueError:
+            artifact_path = None
+        if artifact_path is not None:
+            artifact_path.unlink(missing_ok=True)
+        session.delete(artifact)
+
+    work_dir = ensure_task_dirs(task_id)["work"]
+    for filename in (
+        "subtitles.zh-ja.preproofread.json",
+        "subtitles.zh-ja.preproofread.srt",
+        "proofread-audit.json",
+        "subtitles.zh-ja.json",
+        "subtitles.zh-ja.srt",
+    ):
+        (work_dir / filename).unlink(missing_ok=True)
+
+    task = session.get(Task, task_id)
+    if task is not None:
+        task.storage_bytes = sum(
+            candidate.stat().st_size
+            for candidate in get_task_root(task_id).rglob("*")
+            if candidate.is_file()
+        )
+        session.add(task)

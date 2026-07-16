@@ -303,6 +303,7 @@ describe("classifyArtifactReadiness", () => {
   it.each([
     ["ready", "ready"],
     ["not_ready", "not_ready"],
+    ["not_applicable", "not_applicable"],
     ["missing", "missing"],
     ["failed", "failed"],
     ["load_error", "load_error"],
@@ -312,6 +313,18 @@ describe("classifyArtifactReadiness", () => {
       expect(classifyArtifactReadiness(readiness)).toBe(expected);
     },
   );
+
+  it("does not treat an opted-out highlight artifact as a blocking task state", () => {
+    expect(
+      classifyTaskState(
+        task("success", {
+          artifact_readiness: [
+            { kind: "highlight_candidates_json", stage_name: "highlight", status: "not_applicable", artifact_id: null, path: null },
+          ],
+        }),
+      ),
+    ).toBe("success");
+  });
 });
 
 describe("isRetryable", () => {

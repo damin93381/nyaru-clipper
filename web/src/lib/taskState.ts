@@ -95,7 +95,9 @@ function hasEnabledAction(
 function firstBlockingReadiness(
   readiness: ArtifactReadinessRecord[] | undefined,
 ): ArtifactReadinessRecord | undefined {
-  return readiness?.find((item) => item.status !== "ready");
+  return readiness?.find(
+    (item) => item.status !== "ready" && item.status !== "not_applicable",
+  );
 }
 
 function hasPendingLog(task: TaskDetail): boolean {

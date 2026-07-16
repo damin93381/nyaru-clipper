@@ -73,6 +73,7 @@ const READINESS_PRIORITY: Record<ArtifactReadinessClassification, number> = {
 	failed: 3,
 	not_ready: 2,
 	ready: 1,
+	not_applicable: 0,
 };
 
 const SUBTITLE_READINESS_KINDS = new Set([
@@ -175,6 +176,8 @@ function getReadinessMessage(
 			return messages.loading;
 		case "not_ready":
 			return messages.not_ready;
+		case "not_applicable":
+			return messages.not_applicable;
 		case "missing":
 			return messages.missing;
 		case "failed":

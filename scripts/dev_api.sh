@@ -9,4 +9,5 @@ require_commands uv
 setup_api_dev_env
 require_backend_python
 
+cd "${BACKEND_DIR}"
 exec "${BACKEND_PYTHON_PATH}" -m uvicorn app.main:app --host "${APP_HOST}" --port "${APP_PORT}"

@@ -20,7 +20,7 @@ StageStatus: TypeAlias = Literal[
 ]
 TaskSort: TypeAlias = Literal["updated_at", "created_at", "title", "storage_bytes"]
 SortDirection: TypeAlias = Literal["asc", "desc"]
-ArtifactReadinessStatus: TypeAlias = Literal["ready", "missing", "failed", "not_ready"]
+ArtifactReadinessStatus: TypeAlias = Literal["ready", "missing", "failed", "not_ready", "not_applicable"]
 
 
 class WorkstationSchema(BaseModel):
@@ -197,6 +197,7 @@ RecoveryAction: TypeAlias = Annotated[
 class TaskOverview(TaskListItem):
     """Complete workstation projection for one task."""
 
+    highlight_filtering_enabled: bool
     pipeline_run_id: str | None
     stages: list[TaskStageOverview]
     execution_progress: ExecutionProgressOverview | None

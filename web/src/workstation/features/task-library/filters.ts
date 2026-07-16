@@ -4,7 +4,7 @@ const taskStatuses = ["pending", "running", "success", "failed", "cancelled"] as
 const taskSorts = ["updated_at", "created_at", "title", "storage_bytes"] as const;
 const taskDirections = ["asc", "desc"] as const;
 const taskPageSizes = [25, 50, 100] as const;
-const artifactReadinessStatuses = ["ready", "missing", "failed", "not_ready"] as const;
+const artifactReadinessStatuses = ["ready", "missing", "failed", "not_ready", "not_applicable"] as const;
 
 type TaskStatus = (typeof taskStatuses)[number];
 type TaskSort = (typeof taskSorts)[number];

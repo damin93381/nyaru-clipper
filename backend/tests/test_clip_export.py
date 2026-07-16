@@ -148,6 +148,8 @@ def test_export_confirmed_range(backend_env, monkeypatch) -> None:
     assert artifact_metadata["start_s"] == 12.5
     assert artifact_metadata["end_s"] == 20.0
     assert artifact_metadata["source_duration_s"] == 120.0
+    assert artifact_metadata["export_backend"] == "cpu"
+    assert artifact_metadata["video_encoder"] == "libx264"
 
 
 def test_rejects_out_of_bounds_range(backend_env) -> None:

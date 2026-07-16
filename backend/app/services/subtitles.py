@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -164,4 +166,50 @@ def write_bilingual_subtitle_outputs(
         encoding="utf-8",
     )
     srt_path.write_text(render_bilingual_srt(segments, translated_texts), encoding="utf-8")
+    return transcript_path, srt_path
+
+
+def write_bilingual_subtitle_outputs_atomically(
+    output_dir: Path,
+    segments: list[SubtitleSegment],
+    translated_texts: list[str],
+    *,
+    model_metadata: dict[str, Any],
+    elapsed_seconds: float,
+    transcript_filename: str = "subtitles.zh-ja.json",
+    srt_filename: str = "subtitles.zh-ja.srt",
+) -> tuple[Path, Path]:
+    """Publish a validated bilingual pair only after both complete replacement files exist."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = output_dir / transcript_filename
+    srt_path = output_dir / srt_filename
+    transcript_payload = build_bilingual_subtitle_json(
+        segments,
+        translated_texts,
+        model_metadata=model_metadata,
+        elapsed_seconds=elapsed_seconds,
+    )
+    replacements: list[tuple[Path, str]] = [
+        (transcript_path, json.dumps(transcript_payload, ensure_ascii=False, indent=2, sort_keys=True)),
+        (srt_path, render_bilingual_srt(segments, translated_texts)),
+    ]
+    temporary_paths: list[Path] = []
+    try:
+        for destination, content in replacements:
+            descriptor, temporary_name = tempfile.mkstemp(dir=output_dir, prefix=f".{destination.name}.")
+            temporary_path = Path(temporary_name)
+            temporary_paths.append(temporary_path)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(content)
+                if destination.suffix == ".json":
+                    handle.write("\n")
+        for destination, _ in replacements:
+            temporary_paths.pop(0).replace(destination)
+    except OSError:
+        for destination, _ in replacements:
+            destination.unlink(missing_ok=True)
+        raise
+    finally:
+        for temporary_path in temporary_paths:
+            temporary_path.unlink(missing_ok=True)
     return transcript_path, srt_path

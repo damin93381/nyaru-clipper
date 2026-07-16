@@ -39,7 +39,7 @@ function pageSizeFromInput(value: string): 25 | 50 | 100 {
 }
 
 function readinessFromInput(value: string): TaskLibraryFilters["readiness"] {
-  if (value === "ready" || value === "missing" || value === "failed" || value === "not_ready") return value;
+  if (value === "ready" || value === "missing" || value === "failed" || value === "not_ready" || value === "not_applicable") return value;
   return null;
 }
 
@@ -170,7 +170,7 @@ export function TaskLibraryPage(): ReactNode {
         <label>来源<select className="ny-input" onChange={(event) => replaceFilters({ ...filters, sourceKind: sourceKindFromInput(event.target.value), page: 1 })} value={filters.sourceKind}><option value="all">全部</option><option value="bilibili">哔哩哔哩</option><option value="local">本地文件</option></select></label>
         <label>更新开始日期<input className="ny-input" onChange={(event) => replaceFilters({ ...filters, updatedFrom: event.target.value || null, page: 1 })} type="date" value={filters.updatedFrom ?? ""} /></label>
         <label>更新结束日期<input className="ny-input" onChange={(event) => replaceFilters({ ...filters, updatedTo: event.target.value || null, page: 1 })} type="date" value={filters.updatedTo ?? ""} /></label>
-        <label>产物状态<select className="ny-input" onChange={(event) => replaceFilters({ ...filters, readiness: readinessFromInput(event.target.value), page: 1 })} value={filters.readiness ?? ""}><option value="">全部</option><option value="ready">可用</option><option value="missing">缺失</option><option value="failed">失败</option><option value="not_ready">未就绪</option></select></label>
+        <label>产物状态<select className="ny-input" onChange={(event) => replaceFilters({ ...filters, readiness: readinessFromInput(event.target.value), page: 1 })} value={filters.readiness ?? ""}><option value="">全部</option><option value="ready">可用</option><option value="missing">缺失</option><option value="failed">失败</option><option value="not_ready">未就绪</option><option value="not_applicable">未启用自动高光筛选</option></select></label>
         <div className="ny-task-library__tag-filter">
           <label htmlFor="task-library-tag">标签<input className="ny-input" id="task-library-tag" onChange={(event) => setTagInput(event.target.value)} value={tagInput} /></label>
           <div className="ny-task-library__tag-actions">

@@ -7,8 +7,9 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.models import Artifact, ClipCandidate
+from app.services.export_encoding import ExportInvocation, execute_video_export
 from app.repositories.tasks import get_task_record
-from app.services.pipeline_support import run_logged_command, set_stage_status
+from app.services.pipeline_support import set_stage_status
 from app.services.source_catalog import resolve_local_reference_artifact
 from app.services.storage import ensure_task_dirs, log_file_for_stage, persist_artifact_metadata
 from app.settings import get_settings
@@ -59,23 +60,18 @@ def export_confirmed_clip(
     output_path = task_dirs["exports"] / _build_export_filename(clip_start_s, clip_end_s)
     log_path = log_file_for_stage(task_id, "export")
     settings = get_settings()
-    ffmpeg_args = [
-        settings.ffmpeg_binary,
-        "-y",
-        "-ss",
-        _format_ffmpeg_seconds(clip_start_s),
-        "-to",
-        _format_ffmpeg_seconds(clip_end_s),
-        "-i",
-        str(source_video_path),
-        "-c:v",
-        "libx264",
-        "-c:a",
-        "aac",
-        str(output_path),
-    ]
-    redactions = {str(source_video_path): source_reference} if source_reference != str(source_video_path) else None
-    ffmpeg_result = run_logged_command(ffmpeg_args, log_path=log_path, redactions=redactions)
+    execution = execute_video_export(
+        ExportInvocation(
+            source_path=source_video_path,
+            output_path=output_path,
+            start_s=clip_start_s,
+            end_s=clip_end_s,
+            source_reference=source_reference,
+        ),
+        settings,
+        log_path,
+    )
+    ffmpeg_result = execution.completed_process
     if ffmpeg_result.returncode != 0 or not output_path.exists():
         set_stage_status(session, task_id=task_id, stage_name="export", status="failed", summary="ffmpeg_failed")
         session.commit()
@@ -93,6 +89,8 @@ def export_confirmed_clip(
         end_s=clip_end_s,
         source_duration_s=source_duration_s,
         source_video_reference=source_reference,
+        export_backend=execution.export_backend,
+        video_encoder=execution.video_encoder,
     )
     candidate.status = "exported"
     session.add(candidate)
@@ -220,6 +218,8 @@ def _persist_export_artifact(
     end_s: float,
     source_duration_s: float,
     source_video_reference: str,
+    export_backend: str,
+    video_encoder: str,
 ) -> Artifact:
     existing = session.exec(
         select(Artifact)
@@ -235,6 +235,8 @@ def _persist_export_artifact(
         "source_duration_s": source_duration_s,
         "source_video_path": source_video_reference,
         "filename": output_path.name,
+        "export_backend": export_backend,
+        "video_encoder": video_encoder,
     }
     if existing is not None:
         existing.metadata_json = json.dumps(metadata, sort_keys=True)

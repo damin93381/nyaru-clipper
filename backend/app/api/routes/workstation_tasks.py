@@ -66,6 +66,7 @@ class CreateWorkstationTaskRequest(WorkstationSchema):
     source: TaskSource
     profile_id: Literal["standard"]
     priority: int = 0
+    highlight_filtering_enabled: bool = False
 
 
 class CreateWorkstationTaskResponse(WorkstationSchema):
@@ -74,6 +75,7 @@ class CreateWorkstationTaskResponse(WorkstationSchema):
     task_id: str
     profile_id: Literal["standard"]
     priority: int
+    highlight_filtering_enabled: bool
     status: Literal["pending"]
 
 
@@ -135,6 +137,7 @@ def create_workstation_task_endpoint(
         task_id=task.id,
         profile_id=payload.profile_id,
         priority=payload.priority,
+        highlight_filtering_enabled=task.highlight_filtering_enabled,
         status="pending",
     )
 
@@ -224,6 +227,7 @@ def _create_workstation_task(session: Session, payload: CreateWorkstationTaskReq
         source_video_id=source_video_id,
         status="pending",
         title=media_source.display_name,
+        highlight_filtering_enabled=payload.highlight_filtering_enabled,
     )
     session.add(task)
     session.add(media_source)

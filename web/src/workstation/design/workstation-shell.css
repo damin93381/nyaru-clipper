@@ -387,6 +387,12 @@
 .ny-task-create__copy-phrase { white-space: nowrap; }
 .ny-task-create__technical { overflow-wrap: anywhere; font-family: var(--ny-font-mono); font-size: var(--ny-font-caption) !important; }
 .ny-task-create__radio-actions [role="radio"][aria-checked="true"] { color: var(--ny-surface); border-color: var(--ny-accent); background: var(--ny-accent); }
+.ny-task-create__option { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--ny-space-3); align-items: start; min-height: var(--ny-target-min); padding: var(--ny-space-3); border: 1px solid var(--ny-border); border-radius: var(--ny-radius-1); color: var(--ny-ink); background: var(--ny-surface); cursor: pointer; }
+.ny-task-create__option:hover { border-color: var(--ny-ink-muted); background: var(--ny-surface-muted); }
+.ny-task-create__option:focus-within { outline: 3px solid var(--ny-focus); outline-offset: 2px; }
+.ny-task-create__option input { width: 20px; height: 20px; margin: 0; accent-color: var(--ny-accent); }
+.ny-task-create__option span { display: grid; gap: var(--ny-space-1); line-height: var(--ny-line-body); }
+.ny-task-create__option span span { color: var(--ny-ink-muted); font-size: var(--ny-font-caption); }
 .ny-task-create__footer-error { margin: 0; padding: var(--ny-space-3); border-top: 1px solid color-mix(in srgb, var(--ny-danger) 35%, var(--ny-border)); color: var(--ny-danger); background: color-mix(in srgb, var(--ny-danger) 8%, var(--ny-surface)); font-size: var(--ny-font-caption); line-height: var(--ny-line-body); }
 
 .ny-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

@@ -450,6 +450,10 @@ def retry_task_from_stage(session: Session, task_id: str, stage_name: str) -> di
         raise QueueConflict(get_queue_snapshot(session), "Task must be terminal before retry")
 
     reset_index = CANONICAL_STAGES.index(stage_name)
+    if reset_index <= CANONICAL_STAGES.index("translation"):
+        from app.services.storage import invalidate_translation_artifacts
+
+        invalidate_translation_artifacts(session, task_id=task_id)
     for stage in record.stages:
         stage_index = CANONICAL_STAGES.index(stage.name)
         if stage_index >= reset_index:

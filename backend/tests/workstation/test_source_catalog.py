@@ -108,6 +108,44 @@ def test_bilibili_inspection_normalizes_supported_urls_without_live_network(
     }
 
 
+def test_bilibili_inspection_falls_back_to_bbdown_when_ytdlp_metadata_fails(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    # Given: yt-dlp rejects a public source while BBDown can return compatible metadata.
+    commands: list[list[str]] = []
+
+    def inspect(command: list[str]) -> str:
+        commands.append(command)
+        if command[0] == "yt-dlp":
+            from app.services.source_catalog import SourceCatalogError
+
+            raise SourceCatalogError("Bilibili inspection failed")
+        return "title: Nyaru stream\nuploader: Nyaru\nduration: 42"
+
+    monkeypatch.setattr("app.services.source_catalog.run_bilibili_inspection_command", inspect)
+
+    # When: the public Bilibili source is inspected through the workstation API.
+    response = client.post(
+        "/api/v2/sources/bilibili/inspect",
+        json={"url": "https://www.bilibili.com/video/BV1fallback"},
+    )
+
+    # Then: the check remains usable through BBDown rather than blocking task creation.
+    assert response.status_code == 200
+    assert response.json() == {
+        "normalized_url": "https://www.bilibili.com/video/BV1fallback",
+        "source_video_id": "BV1fallback",
+        "title": "Nyaru stream",
+        "uploader": "Nyaru",
+        "duration_seconds": 42.0,
+    }
+    assert commands == [
+        ["yt-dlp", "--dump-single-json", "--no-download", "https://www.bilibili.com/video/BV1fallback"],
+        ["BBDown", "--only-show-info", "--hide-streams", "https://www.bilibili.com/video/BV1fallback"],
+    ]
+
+
 @pytest.mark.parametrize("url", ["https://b23.tv/BV1short", "http://www.bilibili.com/video/BV1insecure", "https://example.invalid/BV1abc"])
 def test_bilibili_inspection_rejects_untrusted_or_insecure_bv_urls(client: TestClient, monkeypatch, url: str) -> None:
     # Given: a short-link, insecure Bilibili URL, or non-Bilibili URL whose path contains a BV-shaped identifier.

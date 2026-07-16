@@ -131,6 +131,25 @@ def test_task_library_readiness_filters_treat_deleted_artifact_files_as_missing(
     assert [item["task_id"] for item in ready_response.json()["items"]] == []
 
 
+def test_task_library_readiness_filter_matches_a_skipped_highlight_stage(client: TestClient) -> None:
+    # Given: a task that deliberately opted out of automatic highlight filtering.
+    from app.db import session_scope
+    from app.models import TaskStage
+
+    with session_scope() as session:
+        _seed_task(session, task_id="task-no-highlights", status="success")
+        session.add(TaskStage(task_id="task-no-highlights", name="highlight", status="skipped"))
+
+    # When: the workstation library filters for the non-applicable artifact state.
+    response = client.get("/api/v2/tasks", params={"readiness": "not_applicable"})
+    not_ready_response = client.get("/api/v2/tasks", params={"readiness": "not_ready"})
+
+    # Then: the task is returned rather than treated as an invalid filter.
+    assert response.status_code == 200
+    assert [item["task_id"] for item in response.json()["items"]] == ["task-no-highlights"]
+    assert [item["task_id"] for item in not_ready_response.json()["items"]] == []
+
+
 def test_task_library_summary_and_missing_overview_are_exposed(client: TestClient) -> None:
     # Given: a library with one queued task.
     from app.db import session_scope
@@ -147,6 +166,29 @@ def test_task_library_summary_and_missing_overview_are_exposed(client: TestClien
     assert summary_response.json()["queued"] == 1
     assert missing_response.status_code == 404
     assert missing_response.json() == {"detail": "Task not found"}
+
+
+def test_skipped_highlight_stage_has_no_required_candidate_artifact() -> None:
+    # Given: the workstation's canonical highlight stage was deliberately skipped.
+    from app.api.schemas.workstation import TaskStageOverview
+    from app.repositories.workstation import _artifact_readiness
+
+    stage = TaskStageOverview(
+        name="highlight",
+        status="skipped",
+        summary="Automatic highlight filtering disabled for this task",
+        failure_code=None,
+        attempts=1,
+        started_at=None,
+        finished_at=None,
+        planned=False,
+    )
+
+    # When: artifact readiness is projected without a candidate artifact.
+    readiness = _artifact_readiness([stage], [])
+
+    # Then: the omission is explicitly non-applicable, not reported as missing.
+    assert readiness[0].status == "not_applicable"
 
 
 def test_task_library_patch_replaces_tags(client: TestClient) -> None:

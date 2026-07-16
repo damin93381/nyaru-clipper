@@ -53,6 +53,7 @@ class Task(SQLModel, table=True):
     title: str | None = Field(default=None)
     archived_at: datetime | None = Field(default=None)
     storage_bytes: int = Field(default=0)
+    highlight_filtering_enabled: bool = Field(default=True)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

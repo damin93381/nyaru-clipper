@@ -227,6 +227,74 @@ def test_retry_endpoint_after_asr_preserves_asr_progress_and_successful_upstream
         assert progress_latest_message == "asr complete"
 
 
+def test_translation_retry_removes_prior_translation_and_proofread_finals_but_keeps_asr(tmp_path, monkeypatch) -> None:
+    # Given: a failed translation retry with stale canonical and preproofread artifacts on disk.
+    data_dir = tmp_path / "data"
+    db_path = tmp_path / "task-state.sqlite3"
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("APP_DATABASE_URL", f"sqlite:///{db_path}")
+    _reset_runtime_state()
+
+    from app.db import session_scope
+    from app.main import app
+    from app.models import Artifact, Task, TaskJob, TaskStage
+
+    with TestClient(app) as client:
+        task_id = _create_task(client)
+        work_dir = data_dir / "tasks" / task_id / "work"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        asr_path = work_dir / "asr-segments.json"
+        asr_path.write_text("{}", encoding="utf-8")
+        stale_paths = [
+            work_dir / "subtitles.zh-ja.preproofread.json",
+            work_dir / "subtitles.zh-ja.preproofread.srt",
+            work_dir / "proofread-audit.json",
+            work_dir / "subtitles.zh-ja.json",
+            work_dir / "subtitles.zh-ja.srt",
+        ]
+        for stale_path in stale_paths:
+            stale_path.write_text("stale", encoding="utf-8")
+
+        with session_scope() as session:
+            task = session.get(Task, task_id)
+            assert task is not None
+            task.status = "failed"
+            session.add(task)
+            for stage in session.exec(select(TaskStage).where(TaskStage.task_id == task_id)).all():
+                stage.status = "success" if stage.name in {"ingest", "media_prep", "asr"} else "skipped"
+                if stage.name == "translation":
+                    stage.status = "failed"
+                    stage.summary = "translation_proofread_invalid_response"
+                session.add(stage)
+            job = session.exec(select(TaskJob).where(TaskJob.task_id == task_id)).one()
+            job.status = "failed"
+            job.stage_name = "translation"
+            session.add(job)
+            session.add(Artifact(task_id=task_id, stage_name="asr", kind="transcript_json", path=str(asr_path)))
+            for stale_path in stale_paths:
+                session.add(
+                    Artifact(
+                        task_id=task_id,
+                        stage_name="translation",
+                        kind="bilingual_transcript_json",
+                        path=str(stale_path),
+                    )
+                )
+
+        # When: the operator retries only translation.
+        response = client.post(f"/api/tasks/{task_id}/retry", json={"stage_name": "translation"})
+
+        # Then: the valid ASR input survives, while no old translation/proofread final can look current.
+        assert response.status_code == 202
+        assert asr_path.exists()
+        assert all(not stale_path.exists() for stale_path in stale_paths)
+        with session_scope() as session:
+            artifact_stages = [
+                artifact.stage_name for artifact in session.exec(select(Artifact).where(Artifact.task_id == task_id)).all()
+            ]
+        assert artifact_stages == ["asr"]
+
+
 def test_retry_endpoint_rejects_running_task_without_creating_another_run(tmp_path, monkeypatch) -> None:
     data_dir = tmp_path / "data"
     db_path = tmp_path / "task-state.sqlite3"

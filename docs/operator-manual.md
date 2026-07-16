@@ -74,6 +74,8 @@ pnpm --dir web install --frozen-lockfile
 
 Runtime startup stays on the shared `./scripts/dev_api.sh`, `./scripts/dev_worker.sh`, `./scripts/dev_web.sh`, and `./scripts/dev_up.sh` entrypoints.
 
+The WSL installer also compiles the CTranslate2 HIP backend needed by WhisperX ASR. A passing Torch-only check is not sufficient: before accepting ASR capacity, run `./scripts/check_wsl_rocm.sh` and confirm both `ctranslate2.cuda_device_count=1` and support for the configured `APP_WHISPERX_COMPUTE_TYPE` (default `float16`). This is a capability check; validate a real ASR task after changing ROCm, models, or GPU hardware. The first install is a source build and needs `git`, CMake, ROCm development libraries, OpenBLAS headers, and `readelf`.
+
 ### Split-process startup
 
 From the repo root:
@@ -102,7 +104,12 @@ Useful overrides:
 - `VITE_PORT` to change the web port, default `5173`
 - `VITE_API_BASE_URL` to point browser clients at the host API URL
 - `APP_BILIBILI_COOKIE_PATH` to point the backend at a cookie file path
+- `APP_DEEPSEEK_API_KEY` for server-side-only subtitle proofreading; never set it in a `VITE_*` variable, browser storage, or a task form
 - `APP_DATA_DIR` if you need storage outside the repo `data/` tree
+- `APP_EXPORT_VIDEO_BACKEND=windows-amf` to opt confirmed clip export into Windows AMD AMF; the default is `cpu`
+- `APP_WINDOWS_FFMPEG_BINARY` to the Windows `ffmpeg.exe` used by AMF, for example `/mnt/e/Program Files/ffmpeg-N-125573-g90436de5e1-win64-gpl-shared/bin/ffmpeg.exe`
+
+When AMF is selected, the exporter converts managed WSL paths for the Windows executable and uses `h264_amf`. A path-conversion, encoder, or output failure is logged and falls back once to CPU `libx264`; artifact metadata records the backend and encoder that actually produced the clip.
 
 ### LAN access caveat for the web UI
 
@@ -194,6 +201,8 @@ The canonical backend stage order is:
 6. `export`
 7. `report`
 
+Automatic highlight filtering is a per-task option for new v2 workstation tasks and defaults to **off**. Enable it in the new-task drawer only when automatic candidate ranking is required. When disabled, the canonical `highlight` stage remains visible but finishes as `skipped`, candidate readiness is reported as `not_applicable`, and the task can still complete successfully. Existing tasks keep automatic highlight filtering enabled after migration so their previous behavior is preserved.
+
 In the current MVP, pipeline `export` is intentionally marked as skipped until the user confirms a clip through `POST /api/tasks/{task_id}/clips`.
 
 ### Stage status updates and execution context
@@ -261,6 +270,26 @@ It does not change the current quality-preserving defaults for:
 
 Cold starts, model downloads, and degraded CPU fallback behavior remain the same as before. CPU or GPU performance tuning is out of scope for this phase.
 
+## Five-minute ASR, translation, and proofread operation
+
+Media preparation creates exact 300-second task-local WAV slices for new runs. The single worker processes those slices sequentially: ASR first, then translation, then a merged bilingual text-only DeepSeek proofread. It restores segment and word timestamps to the original source timeline; it does not replace or re-encode the source video for subtitle timing.
+
+During a live run, the task overview can expose safe substep summaries from `execution_progress` and the stage summary. `ASR 2/5` and `Translation 4/5` mean completed work slices out of the task total. `Translation merge` means per-slice translations are being assembled, while `Translation proofread` means the final required text review is running. These strings do not expose an API key, provider header, prompt, raw response, cookie, host path, or media payload.
+
+The DeepSeek key is backend-only. Set `APP_DEEPSEEK_API_KEY` in the API/worker process environment or its secret store, and never in the browser, task metadata, frontend file, artifact, or log. The only task-derived data that leave the workstation for proofreading are subtitle text, stable row IDs, and timestamps; source video and audio do not. The fixed server prompt and raw provider response remain backend-only.
+
+### Resume and failure recovery
+
+- A retry reuses valid completed slices. Missing, corrupt, or failed ASR/translation slice outputs are recomputed; completed tasks are not rewritten.
+- Retry from `translation` preserves valid ASR output but invalidates old preproofread/final translation publication so stale final subtitles cannot look current.
+- `translation_proofread_missing_api_key`: add the backend-only key, restart the API/worker processes that read it, then retry `translation`.
+- `translation_proofread_auth_failed` (401): correct the provider credential, then retry `translation`.
+- `translation_proofread_billing_failed` (402): resolve provider billing, then retry `translation`.
+- `translation_proofread_rate_limit`, `translation_proofread_timeout`, and `translation_proofread_transient_exhausted`: wait for the temporary provider condition to clear, then retry `translation`. Built-in provider retries are bounded.
+- `translation_proofread_invalid_response`: retry `translation` after the provider issue is resolved. Reordered rows, changed timestamps, empty text, and malformed responses are rejected.
+
+Proofreading is mandatory for final bilingual publication. A proofread failure does not silently promote preproofread diagnostic subtitles; highlight, report, and export use only validated final bilingual artifacts.
+
 ## Runtime capability visibility
 
 Runtime capability checks are non-blocking visibility signals.
@@ -301,6 +330,8 @@ rocminfo
 ls -l /dev/dxg /dev/kfd
 /home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m torch.utils.collect_env
 ```
+
+This repository's WSL profile targets the AMD ROCm 7.2 wheel repository. On ROCm releases before 7.13, the shared entrypoints and doctor automatically enable `HSA_ENABLE_DXG_DETECTION=1` when ROCDXG and `/dev/dxg` are present. Export the same variable when launching Python or Uvicorn outside the shared scripts.
 
 One WSL-specific failure mode is that `rocminfo` already sees the AMD GPU, but torch still cannot open it. In that case, apply the AMD-documented HSA runtime replacement inside the dedicated backend environment:
 

@@ -169,6 +169,7 @@ def test_upgrade_database_backfills_workstation_domain_from_legacy_schema(tmp_pa
     assert pipeline_run.task_id == task_id
     assert [item.name for item in stage_runs] == CANONICAL_STAGES
     assert migrated_task.title
+    assert migrated_task.highlight_filtering_enabled is True
     assert migrated_task.storage_bytes == expected_task_directory_size
     with sqlite3.connect(database_path) as connection:
         search_row = connection.execute(

@@ -10,7 +10,7 @@ from sqlmodel import Session
 from app.repositories.tasks import get_task_record
 from app.services.pipeline_support import append_stage_log, run_logged_command, set_stage_status
 from app.services.storage import ensure_task_dirs, log_file_for_stage, persist_artifact_metadata
-from app.settings import get_settings
+from app.settings import get_bbdown_extra_args, get_settings
 
 
 @dataclass(slots=True)
@@ -47,6 +47,7 @@ def download_bilibili_vod(session: Session, task_id: str) -> DownloadResult:
         record.task.normalized_source_url,
         raw_dir=raw_dir,
         cookie_value=cookie_value,
+        extra_args=get_bbdown_extra_args(settings),
     )
     bbdown_result = run_logged_command(bbdown_args, log_path=log_path)
     if bbdown_result.returncode == 0:
@@ -115,10 +116,18 @@ def _load_cookie_value(cookie_path: Path | None) -> tuple[str | None, bool]:
     return (value or None), bool(value)
 
 
-def _build_bbdown_args(binary: str, source_url: str, *, raw_dir: Path, cookie_value: str | None) -> list[str]:
+def _build_bbdown_args(
+    binary: str,
+    source_url: str,
+    *,
+    raw_dir: Path,
+    cookie_value: str | None,
+    extra_args: list[str],
+) -> list[str]:
     args = [binary, "--work-dir", str(raw_dir), "--file-pattern", "source"]
     if cookie_value:
         args.extend(["-c", cookie_value])
+    args.extend(extra_args)
     args.append(source_url)
     return args
 

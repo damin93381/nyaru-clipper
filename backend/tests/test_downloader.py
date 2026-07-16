@@ -103,6 +103,45 @@ def test_bbdown_success_persists_normalized_artifacts(backend_env, monkeypatch) 
     assert artifact_kinds == {"source_metadata", "source_video"}
 
 
+def test_bbdown_includes_configured_runtime_extra_args(backend_env, monkeypatch) -> None:
+    monkeypatch.setenv(
+        "APP_BBDOWN_EXTRA_ARGS",
+        "--upos-host upos-sz-mirror08c.bilivideo.com --video-ascending --audio-ascending",
+    )
+    task_id = _create_task("https://www.bilibili.com/video/BV1xx411c7mD?p=1")
+    commands: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        commands.append(list(args))
+        output_path = Path(backend_env["data_dir"]) / "tasks" / task_id / "raw" / "source.mp4"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"video-bytes")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    from app.db import session_scope
+    from app.services.downloader import download_bilibili_vod
+
+    with session_scope() as session:
+        download_bilibili_vod(session, task_id)
+
+    assert commands == [
+        [
+            "BBDown",
+            "--work-dir",
+            str(Path(backend_env["data_dir"]) / "tasks" / task_id / "raw"),
+            "--file-pattern",
+            "source",
+            "--upos-host",
+            "upos-sz-mirror08c.bilivideo.com",
+            "--video-ascending",
+            "--audio-ascending",
+            "https://www.bilibili.com/video/BV1xx411c7mD",
+        ]
+    ]
+
+
 def test_bbdown_failure_falls_back_to_ytdlp(backend_env, monkeypatch) -> None:
     task_id = _create_task("https://www.bilibili.com/video/BV1xy411c7mE")
     commands: list[list[str]] = []

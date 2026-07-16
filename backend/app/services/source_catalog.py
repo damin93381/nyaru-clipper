@@ -148,9 +148,14 @@ def inspect_bilibili_source(url: str) -> SourceInspection:
     except ValueError as exc:
         raise SourceCatalogError(str(exc)) from exc
     settings = get_settings()
-    stdout = run_bilibili_inspection_command(
-        [settings.ytdlp_binary, "--dump-single-json", "--no-download", normalized_url]
-    )
+    try:
+        stdout = run_bilibili_inspection_command(
+            [settings.ytdlp_binary, "--dump-single-json", "--no-download", normalized_url]
+        )
+    except SourceCatalogError:
+        stdout = run_bilibili_inspection_command(
+            [settings.bbdown_binary, "--only-show-info", "--hide-streams", normalized_url]
+        )
     metadata = _normalize_metadata(stdout, fallback_video_id=source_video_id)
     title = metadata.get("title")
     uploader = metadata.get("uploader")

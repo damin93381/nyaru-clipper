@@ -15,14 +15,17 @@ from app.services.asr_whisperx import (
     ASR_PIPELINE_PHASES,
     ASR_STAGE_SUCCESS_SUMMARY,
     AsrFailure,
+    load_valid_asr_chunk_manifest,
+    merge_asr_chunk_artifacts,
+    publish_merged_asr_artifacts,
     load_asr_result_manifest,
-    publish_asr_artifacts_from_manifest,
 )
 from app.services.failure_codes import failure_code_from_exception
 from app.services.downloader import download_bilibili_vod
 from app.services.highlights import analyze_task_highlights
 from app.services.media_prep import prepare_media_for_asr
-from app.services.pipeline_support import append_stage_log, run_tracked_structured_process_group_command
+from app.services.media_chunks import MediaChunkFailure, load_media_chunk_manifest, media_chunk_manifest_path
+from app.services.pipeline_support import append_stage_log, run_tracked_structured_process_group_command, set_stage_status
 from app.services.reporting import generate_task_report
 from app.services.source_catalog import resolve_local_reference_artifact, resolve_persisted_local_media_source
 from app.services.storage import ensure_task_dirs, log_file_for_stage, persist_artifact_metadata
@@ -270,31 +273,59 @@ def _execute_asr_subprocess(session: Session, task_id: str) -> StageDirective:
     if record is None:
         raise ValueError(f"Unknown task_id: {task_id}")
 
+    work_dir = ensure_task_dirs(task_id)["work"]
+    try:
+        chunk_manifest = load_media_chunk_manifest(media_chunk_manifest_path(work_dir))
+    except MediaChunkFailure as exc:
+        raise AsrFailure(
+            code="missing_input",
+            message="ASR media chunk manifest is missing or invalid. Re-run media preparation before retrying.",
+        ) from exc
+    if not chunk_manifest.chunks:
+        raise AsrFailure(code="missing_input", message="ASR media chunk manifest contains no audio chunks.")
+
     log_path = log_file_for_stage(task_id, "asr")
     progress_tracker = _AsrExecutionProgressTracker(session=session, task_id=task_id)
     clear_task_execution_progress(session, task_id=task_id)
     session.commit()
 
     try:
-        process_result = run_tracked_structured_process_group_command(
-            session,
-            task_id=task_id,
-            args=build_asr_child_command(task_id),
-            log_path=log_path,
-            on_event=progress_tracker.handle_event,
-        )
-        success_event = _resolve_success_event(process_result.events)
-        if process_result.completed_process.returncode != 0:
-            raise _resolve_child_failure(task_id=task_id, events=process_result.events)
-        if success_event is None:
-            raise AsrFailure(
-                code="asr_child_failed",
-                message="ASR child exited without emitting a terminal success event.",
+        completed_count = 0
+        total_count = len(chunk_manifest.chunks)
+        for chunk in chunk_manifest.chunks:
+            _raise_if_cancelled_between_asr_chunks(session, task_id=task_id)
+            cached_manifest = load_valid_asr_chunk_manifest(task_id, work_dir=work_dir, chunk=chunk)
+            if cached_manifest is not None:
+                completed_count += 1
+                _record_asr_chunk_progress(
+                    session, task_id=task_id, completed_count=completed_count, total_count=total_count, chunk_index=chunk.index
+                )
+                append_stage_log(log_path, f"asr_chunk={chunk.id} reused progress={completed_count}/{total_count}")
+                continue
+            append_stage_log(
+                log_path,
+                f"asr_chunk={chunk.id} start_seconds={chunk.start_seconds} end_seconds={chunk.end_seconds}",
             )
-        manifest_path = _resolve_success_manifest_path(success_event)
-        _ensure_current_execution_context_if_bound(session, task_id=task_id)
-        manifest = load_asr_result_manifest(manifest_path)
-        publish_asr_artifacts_from_manifest(session, task_id=task_id, manifest=manifest)
+            process_result = run_tracked_structured_process_group_command(
+                session,
+                task_id=task_id,
+                args=build_asr_child_command(task_id, chunk.index),
+                log_path=log_path,
+                on_event=progress_tracker.handle_event,
+            )
+            if process_result.completed_process.returncode != 0:
+                raise _resolve_child_failure(task_id=task_id, events=process_result.events)
+            if _resolve_success_event(process_result.events) is None:
+                raise AsrFailure(code="asr_child_failed", message="ASR child exited without a terminal success event.")
+            if load_valid_asr_chunk_manifest(task_id, work_dir=work_dir, chunk=chunk) is None:
+                raise AsrFailure(code="invalid_chunk_output", message=f"ASR child produced an invalid result for {chunk.id}.")
+            completed_count += 1
+            _record_asr_chunk_progress(
+                session, task_id=task_id, completed_count=completed_count, total_count=total_count, chunk_index=chunk.index
+            )
+        append_stage_log(log_path, "asr_merge=start")
+        artifacts = merge_asr_chunk_artifacts(task_id, work_dir=work_dir, chunks=chunk_manifest.chunks)
+        publish_merged_asr_artifacts(session, task_id=task_id, artifacts=artifacts)
         _ensure_current_execution_context_if_bound(session, task_id=task_id)
         session.commit()
         return StageDirective(status="success", summary=ASR_STAGE_SUCCESS_SUMMARY)
@@ -303,8 +334,50 @@ def _execute_asr_subprocess(session: Session, task_id: str) -> StageDirective:
         session.commit()
 
 
+def _record_asr_chunk_progress(
+    session: Session, *, task_id: str, completed_count: int, total_count: int, chunk_index: int
+) -> None:
+    summary = f"ASR {completed_count}/{total_count}"
+    set_stage_status(session, task_id=task_id, stage_name="asr", status="running", summary=summary)
+    upsert_task_execution_progress(
+        session,
+        task_id=task_id,
+        stage_name="asr",
+        current_phase="chunk",
+        phase_index=completed_count,
+        phase_count=total_count,
+        latest_message=summary,
+        phase_started_at=None,
+        heartbeat_at=utc_now(),
+        phase_timings=[{"name": f"chunk-{chunk_index:04d}", "status": "success", "elapsed_ms": None}],
+    )
+    session.commit()
+
+
+def _raise_if_cancelled_between_asr_chunks(session: Session, *, task_id: str) -> None:
+    _ensure_current_execution_context_if_bound(session, task_id=task_id)
+    requests = get_control_requests(session, task_id=task_id)
+    if not (requests.cancel_requested or requests.force_kill_requested):
+        return
+    context = get_execution_context(session)
+    execution_token = context.get("execution_token") if context is not None else None
+    if isinstance(execution_token, str):
+        finalize_cancelled(session, task_id=task_id, execution_token=execution_token)
+        raise StaleExecutionTokenError(task_id=task_id, execution_token=execution_token, current_execution_token=None)
+
+
 def _execute_export(session: Session, task_id: str) -> StageDirective:
     return StageDirective(status="skipped", summary="Awaiting user-confirmed clip export")
+
+
+def _execute_highlight(session: Session, task_id: str):
+    """Run automatic candidate generation only when the task opted in at creation."""
+    task = session.get(Task, task_id)
+    if task is None:
+        raise ValueError(f"Unknown task_id: {task_id}")
+    if not task.highlight_filtering_enabled:
+        return StageDirective(status="skipped", summary="Automatic highlight filtering disabled for this task")
+    return analyze_task_highlights(session, task_id)
 
 
 STAGE_EXECUTORS: dict[str, StageExecutor] = {
@@ -312,7 +385,7 @@ STAGE_EXECUTORS: dict[str, StageExecutor] = {
     "media_prep": _execute_media_prep,
     "asr": _execute_asr_subprocess,
     "translation": translate_task_subtitles,
-    "highlight": analyze_task_highlights,
+    "highlight": _execute_highlight,
     "export": _execute_export,
     "report": generate_task_report,
 }

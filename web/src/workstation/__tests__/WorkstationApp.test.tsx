@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppRouter } from "../../router";
 import { WorkstationApp } from "../WorkstationApp";
+import { ContextInspector } from "../components/ContextInspector";
 import { renderWorkstation } from "../testing/renderWorkstation";
 
 class EventSourceHarness {
@@ -186,6 +187,41 @@ describe("WorkstationApp", () => {
 
     expect(screen.getByText("当前工作区")).toHaveClass("ny-workstation__inspector-copy-phrase");
     expect(screen.getByText("的情况下")).toHaveClass("ny-workstation__inspector-copy-phrase");
+  });
+
+  it("summarizes the active GPU job from the v2 task summary and running-task query when no task is selected", async () => {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (url.pathname.endsWith("/summary")) {
+        return new Response(JSON.stringify({ active: 1, archived: 0, failed: 0, queued: 2, review_required: 0, storage_bytes: 0 }));
+      }
+      return new Response(JSON.stringify({
+        items: [{
+          archived_at: null,
+          created_at: "2026-07-10T03:00:00Z",
+          current_stage: "translation",
+          progress_percent: 58,
+          source_kind: "bilibili",
+          source_label: "夏日档案直播",
+          status: "running",
+          storage_bytes: 4_096,
+          tags: [],
+          task_id: "task-42",
+          title: "夏日档案直播回放",
+          updated_at: "2026-07-11T03:00:00Z",
+        }],
+        page: 1,
+        page_count: 1,
+        page_size: 1,
+        total: 1,
+      }));
+    });
+
+    renderWorkstation(<ContextInspector />);
+
+    expect(await screen.findByRole("heading", { name: "GPU 作业" })).toBeVisible();
+    expect(screen.getByText("夏日档案直播回放")).toBeVisible();
+    expect(screen.getByText("翻译 · 58%")).toBeVisible();
   });
 
   it("keeps the selected-task result phrase together", () => {

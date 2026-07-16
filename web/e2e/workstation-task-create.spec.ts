@@ -53,7 +53,7 @@ test("creates an inspected Bilibili task and exposes it in the ordered queue", a
   await page.getByRole("button", { name: "创建任务" }).click();
 
   await expect(page).toHaveURL(/\/workstation\/tasks\/task-e2e-created$/);
-  expect(createBody).toEqual({ priority: 4, profile_id: "standard", source: { kind: "bilibili", url: "https://www.bilibili.com/video/BV1e2ecreate" } });
+  expect(createBody).toEqual({ highlight_filtering_enabled: false, priority: 4, profile_id: "standard", source: { kind: "bilibili", url: "https://www.bilibili.com/video/BV1e2ecreate" } });
   await page.goto("/workstation/queue");
   await expect(page.getByText("队列版本 2")).toBeVisible();
   await expect(page.getByRole("row", { name: /task-e2e-created/ })).toBeVisible();
@@ -107,6 +107,7 @@ test("creates a referenced local-file task from a trusted root", async ({ page }
 
   await expect(page).toHaveURL(/\/workstation\/tasks\/task-local-reference$/);
   expect(createBody).toEqual({
+    highlight_filtering_enabled: false,
     priority: 0,
     profile_id: "standard",
     source: { import_mode: "reference", kind: "local", relative_path: "archive/episode-01.mp4", root_id: "trusted-media" },

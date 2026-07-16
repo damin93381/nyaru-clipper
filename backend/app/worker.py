@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -25,6 +26,8 @@ from app.services.task_runner import run_task_pipeline
 from app.services.workstation_events import publish_stage_updated, publish_task_updated
 from app.services.workstation_queue import begin_queue_mutation, claim_next_queue_entry, finish_queue_entry
 from app.services.workstation_runs import finish_pipeline_run, get_active_pipeline_run, get_pending_pipeline_run, start_pipeline_run, sync_stage_run
+
+worker_logger = logging.getLogger("app.worker")
 
 
 @dataclass(slots=True)
@@ -273,7 +276,12 @@ def run_worker_iteration(processor: Callable[[ClaimedJob], bool] | None = None) 
 
 def worker_loop(poll_interval: float = 1.0, processor: Callable[[ClaimedJob], bool] | None = None) -> None:
     while True:
-        claimed_job = run_worker_iteration(processor=processor)
+        try:
+            claimed_job = run_worker_iteration(processor=processor)
+        except Exception:
+            worker_logger.exception("worker iteration failed")
+            time.sleep(poll_interval)
+            continue
         if claimed_job is None:
             time.sleep(poll_interval)
             continue

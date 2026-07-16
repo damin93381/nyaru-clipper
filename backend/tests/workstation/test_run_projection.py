@@ -23,7 +23,7 @@ def database(tmp_path, monkeypatch):
     return get_engine()
 
 
-def _create_task(session: Session, task_id: str) -> None:
+def _create_task(session: Session, task_id: str, *, highlight_filtering_enabled: bool = True) -> None:
     from app.models import CANONICAL_STAGES, Task, TaskJob, TaskStage
 
     session.add(
@@ -31,6 +31,7 @@ def _create_task(session: Session, task_id: str) -> None:
             id=task_id,
             source_url=f"file:///fixtures/{task_id}.mp4",
             normalized_source_url=f"file:///fixtures/{task_id}.mp4",
+            highlight_filtering_enabled=highlight_filtering_enabled,
         )
     )
     session.add(TaskJob(task_id=task_id, stage_name="ingest", status="pending"))
@@ -71,6 +72,44 @@ def test_pending_pipeline_run_is_reused_and_every_legacy_stage_is_mirrored(datab
     assert run.status == "success"
     assert [stage.name for stage in stage_runs] == CANONICAL_STAGES
     assert [stage.status for stage in stage_runs] == ["success"] * len(CANONICAL_STAGES)
+
+
+def test_pipeline_skips_disabled_highlight_filtering_without_calling_the_analyzer(database, monkeypatch) -> None:
+    # Given: a task whose immutable creation option disables automatic candidate generation.
+    from app.models import StageRun, TaskStage
+    import app.services.task_runner as task_runner
+
+    with Session(database) as session:
+        _create_task(session, "task-no-highlights", highlight_filtering_enabled=False)
+
+    def non_highlight_executor(session: Session, task_id: str) -> None:
+        return None
+
+    def analyzer_must_not_run(session: Session, task_id: str) -> None:
+        raise AssertionError("automatic highlight analysis must not run when disabled")
+
+    executors = {
+        stage_name: non_highlight_executor for stage_name in task_runner.CANONICAL_STAGE_ORDER
+    }
+    executors["highlight"] = task_runner._execute_highlight
+    monkeypatch.setattr(task_runner, "STAGE_EXECUTORS", executors)
+    monkeypatch.setattr(task_runner, "analyze_task_highlights", analyzer_must_not_run)
+
+    # When: the worker executes the pipeline using the real highlight execution seam.
+    with Session(database) as session:
+        result = task_runner.run_task_pipeline(session, "task-no-highlights")
+        stage = session.exec(
+            select(TaskStage).where(TaskStage.task_id == "task-no-highlights").where(TaskStage.name == "highlight")
+        ).one()
+        run_stage = session.exec(
+            select(StageRun).where(StageRun.name == "highlight")
+        ).one()
+
+    # Then: the pipeline completes and both projections record an intentional skip.
+    assert result.final_status == "success"
+    assert stage.status == "skipped"
+    assert run_stage.status == "skipped"
+    assert stage.summary == "Automatic highlight filtering disabled for this task"
 
 
 def test_failure_cancellation_and_retry_preserve_accurate_run_history(database, monkeypatch) -> None:

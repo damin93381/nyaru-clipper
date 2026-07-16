@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import sys
+from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -17,7 +18,9 @@ from app.services.asr_whisperx import (
     AsrPipelineObserver,
     AsrPipelineResult,
     execute_asr_pipeline,
+    asr_chunk_work_dir,
 )
+from app.services.media_chunks import load_media_chunk_manifest, media_chunk_manifest_path
 from app.services.storage import ensure_task_dirs, get_tasks_root
 from app.settings import Settings, get_settings
 
@@ -110,13 +113,14 @@ class JsonlAsrObserver(AsrPipelineObserver):
         self._stream.flush()
 
 
-def build_asr_child_command(task_id: str, *, python_executable: str | None = None) -> list[str]:
+def build_asr_child_command(task_id: str, chunk_index: int, *, python_executable: str | None = None) -> list[str]:
     executable = python_executable or sys.executable
-    return [executable, "-m", ASR_CHILD_MODULE, task_id]
+    return [executable, "-m", ASR_CHILD_MODULE, task_id, str(chunk_index)]
 
 
 def run_asr_child(
     task_id: str,
+    chunk_index: int,
     *,
     settings: Settings | None = None,
     stream: TextIO | None = None,
@@ -125,16 +129,19 @@ def run_asr_child(
     output_stream = stream or sys.stdout
     observer = JsonlAsrObserver(output_stream)
     work_dir = _resolve_child_work_dir(task_id)
-    audio_path = work_dir / "asr-input.wav"
-    manifest_path = work_dir / ASR_RESULT_MANIFEST_FILENAME
+    chunk = _resolve_child_chunk(work_dir, chunk_index)
+    chunk_work_dir = asr_chunk_work_dir(work_dir, chunk)
+    audio_path = chunk.audio_path
+    manifest_path = chunk_work_dir / ASR_RESULT_MANIFEST_FILENAME
 
     try:
-        pipeline_result = execute_asr_pipeline(
-            audio_path=audio_path,
-            work_dir=work_dir,
-            settings=effective_settings,
-            observer=observer,
-        )
+        with redirect_stdout(sys.stderr):
+            pipeline_result = execute_asr_pipeline(
+                audio_path=audio_path,
+                work_dir=chunk_work_dir,
+                settings=effective_settings,
+                observer=observer,
+            )
     except AsrPipelineError as exc:
         _write_manifest(
             manifest_path,
@@ -163,10 +170,11 @@ def run_asr_child(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the ASR child pipeline for a single task work directory.")
-    parser.add_argument("task_id", help="Task identifier whose work directory contains asr-input.wav")
+    parser = argparse.ArgumentParser(description="Run the ASR child pipeline for one task media chunk.")
+    parser.add_argument("task_id", help="Task identifier owning the media chunk")
+    parser.add_argument("chunk_index", type=int, help="Validated zero-based media chunk index")
     args = parser.parse_args(argv)
-    result = run_asr_child(args.task_id)
+    result = run_asr_child(args.task_id, args.chunk_index)
     return 0 if result.status == "success" else 1
 
 
@@ -244,6 +252,16 @@ def _resolve_child_work_dir(task_id: str) -> Path:
     tasks_root = get_tasks_root().resolve()
     work_dir.relative_to(tasks_root)
     return work_dir
+
+
+def _resolve_child_chunk(work_dir: Path, chunk_index: int):
+    if chunk_index < 0:
+        raise ValueError(f"Invalid ASR chunk index: {chunk_index}")
+    manifest = load_media_chunk_manifest(media_chunk_manifest_path(work_dir))
+    for chunk in manifest.chunks:
+        if chunk.index == chunk_index:
+            return chunk
+    raise ValueError(f"Unknown ASR chunk index: {chunk_index}")
 
 
 def _utc_isoformat() -> str:

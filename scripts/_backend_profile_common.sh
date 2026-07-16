@@ -79,6 +79,6 @@ install_backend_profile() {
   printf 'profile artifact: %s\n' "${profile_requirements_path}"
 
   run_or_print "${dry_run}" bash "${ROOT_DIR}/scripts/export_backend_requirements.sh" --check
-  run_or_print "${dry_run}" uv venv "${BACKEND_VENV_DIR}" --python "${BACKEND_PYTHON_VERSION}"
+  run_or_print "${dry_run}" uv venv "${BACKEND_VENV_DIR}" --python "${BACKEND_PYTHON_VERSION}" --allow-existing
   run_or_print "${dry_run}" uv pip sync --python "${BACKEND_PYTHON_PATH}" --index-strategy unsafe-best-match "${BASE_REQUIREMENTS_PATH}" "${profile_requirements_path}"
 }

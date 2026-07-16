@@ -39,25 +39,34 @@ def _create_task(source_url: str) -> str:
 
 
 def _prepare_asr_input_audio(data_dir: Path, task_id: str) -> Path:
-    audio_path = data_dir / "tasks" / task_id / "work" / "asr-input.wav"
+    from app.services.media_chunks import build_media_chunk_manifest, write_media_chunk_manifest_atomically
+
+    work_dir = data_dir / "tasks" / task_id / "work"
+    manifest = build_media_chunk_manifest(1.0, work_dir=work_dir)
+    audio_path = manifest.chunks[0].audio_path
     audio_path.parent.mkdir(parents=True, exist_ok=True)
     audio_path.write_bytes(b"RIFFfixture")
+    write_media_chunk_manifest_atomically(work_dir / "media-chunks.json", manifest)
     return audio_path
 
 
 def _write_asr_success_outputs(data_dir: Path, task_id: str) -> dict[str, Path]:
+    from app.services.media_chunks import load_media_chunk_manifest
+
     work_dir = data_dir / "tasks" / task_id / "work"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    transcript_path = work_dir / "asr-segments.json"
-    subtitle_path = work_dir / "subtitles.zh.srt"
-    raw_alignment_path = work_dir / "asr-alignment-raw.json"
+    chunk = load_media_chunk_manifest(work_dir / "media-chunks.json").chunks[0]
+    chunk_dir = work_dir / "asr-chunks" / chunk.id
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = chunk_dir / "asr-segments.json"
+    subtitle_path = chunk_dir / "subtitles.zh.srt"
+    raw_alignment_path = chunk_dir / "asr-alignment-raw.json"
 
     transcript_path.write_text(
         json.dumps(
             {
                 "segments": [
-                    {"id": "seg-0001", "text": "你好"},
-                    {"id": "seg-0002", "text": "世界"},
+                    {"id": "seg-0001", "start_seconds": 0.0, "end_seconds": 0.5, "text": "你好"},
+                    {"id": "seg-0002", "start_seconds": 0.5, "end_seconds": 1.0, "text": "世界"},
                 ]
             },
             ensure_ascii=False,
@@ -71,6 +80,98 @@ def _write_asr_success_outputs(data_dir: Path, task_id: str) -> dict[str, Path]:
         "subtitle_path": subtitle_path,
         "raw_alignment_path": raw_alignment_path,
     }
+
+
+def test_asr_runner_executes_missing_chunks_sequentially_and_merges_global_timestamps(backend_env, monkeypatch) -> None:
+    # Given: a three-chunk media manifest and a valid cached first chunk.
+    task_id = _create_task("https://www.bilibili.com/video/BV1chunkrunner001")
+    data_dir = Path(backend_env["data_dir"])
+    from app.services.media_chunks import build_media_chunk_manifest, write_media_chunk_manifest_atomically
+
+    work_dir = data_dir / "tasks" / task_id / "work"
+    manifest = build_media_chunk_manifest(601.25, work_dir=work_dir)
+    for chunk in manifest.chunks:
+        chunk.audio_path.parent.mkdir(parents=True, exist_ok=True)
+        chunk.audio_path.write_bytes(b"RIFFfixture")
+    write_media_chunk_manifest_atomically(work_dir / "media-chunks.json", manifest)
+
+    def write_chunk(index: int) -> Path:
+        chunk = manifest.chunks[index]
+        chunk_dir = work_dir / "asr-chunks" / chunk.id
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = chunk_dir / "asr-segments.json"
+        subtitle_path = chunk_dir / "subtitles.zh.srt"
+        raw_path = chunk_dir / "asr-alignment-raw.json"
+        transcript_path.write_text(
+            json.dumps(
+                {
+                    "segments": [
+                        {"id": "seg-0001", "start_seconds": 0.0, "end_seconds": 1.0, "text": f"片段{index}"}
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        subtitle_path.write_text("", encoding="utf-8")
+        raw_path.write_text("{}", encoding="utf-8")
+        manifest_path = chunk_dir / "asr-result.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "status": "success",
+                    "elapsed_ms_total": 100,
+                    "phases": [],
+                    "artifacts": {
+                        "audio_path": str(chunk.audio_path.resolve()),
+                        "transcript_path": str(transcript_path.resolve()),
+                        "subtitle_path": str(subtitle_path.resolve()),
+                        "raw_alignment_path": str(raw_path.resolve()),
+                    },
+                    "model_metadata": {"language": "zh"},
+                    "error": None,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return manifest_path
+
+    write_chunk(0)
+    executed_indices: list[int] = []
+
+    from app.db import session_scope
+    from app.services.pipeline_support import StructuredProcessGroupResult
+    import app.services.task_runner as task_runner
+
+    def fake_child(session, *, args, on_event=None, **kwargs):
+        index = int(args[-1])
+        executed_indices.append(index)
+        manifest_path = write_chunk(index)
+        event = {"event": "success", "phase": "persist", "elapsed_ms_total": 100, "manifest_path": str(manifest_path)}
+        if on_event is not None:
+            on_event(event)
+        return StructuredProcessGroupResult(
+            completed_process=subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr=""),
+            events=[event],
+            latest_event=event,
+        )
+
+    monkeypatch.setattr(task_runner, "run_tracked_structured_process_group_command", fake_child)
+
+    # When: ASR executes from the media preparation checkpoint.
+    with session_scope() as session:
+        directive = task_runner._execute_asr_subprocess(session, task_id)
+
+    # Then: only uncached chunks run in order and canonical output uses source-global timestamps.
+    merged = json.loads((work_dir / "asr-segments.json").read_text(encoding="utf-8"))
+    assert directive.summary == "Generated aligned transcript and Chinese subtitles"
+    assert executed_indices == [1, 2]
+    assert [(row["id"], row["start_seconds"]) for row in merged["segments"]] == [
+        ("seg-000001", 0.0),
+        ("seg-000002", 300.0),
+        ("seg-000003", 600.0),
+    ]
 
 
 def test_duplicate_submission_returns_existing_task_after_source_video_id_is_discovered(backend_env) -> None:
@@ -478,7 +579,11 @@ while True:
         stages["asr"].summary = None
         session.add(stages["asr"])
 
-    monkeypatch.setattr(task_runner, "build_asr_child_command", lambda current_task_id: [str(script_path)])
+    monkeypatch.setattr(
+        task_runner,
+        "build_asr_child_command",
+        lambda current_task_id, chunk_index: [str(script_path), current_task_id, str(chunk_index)],
+    )
     monkeypatch.setattr(
         task_runner,
         "STAGE_EXECUTORS",
@@ -552,39 +657,38 @@ def test_asr_stage_runs_via_child_and_parent_publishes_results(backend_env, monk
     data_dir = Path(backend_env["data_dir"])
     audio_path = _prepare_asr_input_audio(data_dir, task_id)
     artifact_paths = _write_asr_success_outputs(data_dir, task_id)
-    manifest_path = data_dir / "tasks" / task_id / "work" / "asr-result.json"
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "status": "success",
-                "elapsed_ms_total": 2500,
-                "phases": [
-                    {"name": "model_load", "status": "success", "elapsed_ms": 250},
-                    {"name": "vad", "status": "success", "elapsed_ms": 250},
-                    {"name": "transcribe", "status": "success", "elapsed_ms": 1000},
-                    {"name": "align", "status": "success", "elapsed_ms": 500},
-                    {"name": "persist", "status": "success", "elapsed_ms": 500},
-                ],
-                "artifacts": {
-                    "audio_path": str(audio_path),
-                    "transcript_path": str(artifact_paths["transcript_path"]),
-                    "subtitle_path": str(artifact_paths["subtitle_path"]),
-                    "raw_alignment_path": str(artifact_paths["raw_alignment_path"]),
-                },
-                "model_metadata": {
-                    "provider": "whisperx",
-                    "model_name": "large-v3",
-                    "alignment_model_name": None,
-                    "device": "cpu",
-                    "compute_type": "int8",
-                    "language": "zh",
-                    "batch_size": 8,
-                },
-                "error": None,
+    manifest_path = (
+        data_dir / "tasks" / task_id / "work" / "asr-chunks" / "chunk-0000" / "asr-result.json"
+    )
+    manifest_payload = json.dumps(
+        {
+            "status": "success",
+            "elapsed_ms_total": 2500,
+            "phases": [
+                {"name": "model_load", "status": "success", "elapsed_ms": 250},
+                {"name": "vad", "status": "success", "elapsed_ms": 250},
+                {"name": "transcribe", "status": "success", "elapsed_ms": 1000},
+                {"name": "align", "status": "success", "elapsed_ms": 500},
+                {"name": "persist", "status": "success", "elapsed_ms": 500},
+            ],
+            "artifacts": {
+                "audio_path": str(audio_path),
+                "transcript_path": str(artifact_paths["transcript_path"]),
+                "subtitle_path": str(artifact_paths["subtitle_path"]),
+                "raw_alignment_path": str(artifact_paths["raw_alignment_path"]),
             },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+            "model_metadata": {
+                "provider": "whisperx",
+                "model_name": "large-v3",
+                "alignment_model_name": None,
+                "device": "cpu",
+                "compute_type": "int8",
+                "language": "zh",
+                "batch_size": 8,
+            },
+            "error": None,
+        },
+        ensure_ascii=False,
     )
 
     from app.db import session_scope
@@ -606,7 +710,8 @@ def test_asr_stage_runs_via_child_and_parent_publishes_results(backend_env, monk
         return _handler
 
     def _fake_run_structured_child(session, *, task_id: str, args, log_path, on_event=None, **kwargs):
-        assert args[-1] == task_id
+        assert args[-2:] == [task_id, "0"]
+        manifest_path.write_text(manifest_payload, encoding="utf-8")
         phase_start = {
             "event": "phase_start",
             "phase": "model_load",
@@ -827,7 +932,11 @@ while True:
         stages["asr"].summary = None
         session.add(stages["asr"])
 
-    monkeypatch.setattr(task_runner, "build_asr_child_command", lambda current_task_id: [str(script_path)])
+    monkeypatch.setattr(
+        task_runner,
+        "build_asr_child_command",
+        lambda current_task_id, chunk_index: [str(script_path), current_task_id, str(chunk_index)],
+    )
     monkeypatch.setattr(
         task_runner,
         "STAGE_EXECUTORS",

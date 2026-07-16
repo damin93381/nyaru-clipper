@@ -32,6 +32,18 @@ export const STAGE_LABELS = {
   report: "报告",
 } as const;
 
+export const EXECUTION_PROGRESS_LABELS = {
+  align: "校准字幕时间轴",
+  asrChunk: "ASR",
+  merge: "Translation merge",
+  model_load: "加载模型",
+  persist: "保存结果",
+  proofread: "Translation proofread",
+  transcribe: "转写音频",
+  translationChunk: "Translation",
+  vad: "检测语音",
+} as const;
+
 export const KNOWN_REASON_CODE_LABELS = {
   laughter_phrase: "笑声片段",
   emphasis_punctuation: "强调标点",
@@ -59,12 +71,38 @@ export const SHARED_FALLBACK_COPY = {
   noMetadata: "该产物暂无元数据。",
 } as const;
 
+interface ExecutionProgressLabelInput {
+  readonly phase: string;
+  readonly phaseCount: number;
+  readonly phaseIndex: number;
+  readonly stageName: string;
+}
+
 export function getTaskStatusLabel(status: string): string {
   return TASK_STATUS_LABELS[status as keyof typeof TASK_STATUS_LABELS] ?? status;
 }
 
 export function getStageLabel(stageName: string): string {
   return STAGE_LABELS[stageName as keyof typeof STAGE_LABELS] ?? stageName;
+}
+
+export function getExecutionProgressLabel({ phase, phaseCount, phaseIndex, stageName }: ExecutionProgressLabelInput): string {
+  switch (phase) {
+    case "chunk": {
+      const label = stageName === "asr"
+        ? EXECUTION_PROGRESS_LABELS.asrChunk
+        : EXECUTION_PROGRESS_LABELS.translationChunk;
+      return `${label} ${phaseIndex}/${phaseCount}`;
+    }
+    case "merge": return EXECUTION_PROGRESS_LABELS.merge;
+    case "proofread": return EXECUTION_PROGRESS_LABELS.proofread;
+    case "model_load": return `${EXECUTION_PROGRESS_LABELS.model_load} · ${phaseIndex} / ${phaseCount}`;
+    case "vad": return `${EXECUTION_PROGRESS_LABELS.vad} · ${phaseIndex} / ${phaseCount}`;
+    case "transcribe": return `${EXECUTION_PROGRESS_LABELS.transcribe} · ${phaseIndex} / ${phaseCount}`;
+    case "align": return `${EXECUTION_PROGRESS_LABELS.align} · ${phaseIndex} / ${phaseCount}`;
+    case "persist": return `${EXECUTION_PROGRESS_LABELS.persist} · ${phaseIndex} / ${phaseCount}`;
+    default: return `${phase} · ${phaseIndex} / ${phaseCount}`;
+  }
 }
 
 export function getReasonCodeLabel(reasonCode: string | null | undefined): string {

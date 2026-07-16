@@ -8,6 +8,8 @@ BACKEND_PYTHON_PATH="${BACKEND_VENV_DIR}/bin/python"
 export ROOT_DIR
 export BACKEND_DIR BACKEND_VENV_DIR BACKEND_PYTHON_PATH
 export PATH="${ROOT_DIR}/.bin:${PATH}"
+# Required by the ROCm HSA runtime to discover the WSL DXG GPU bridge.
+export HSA_ENABLE_DXG_DETECTION=1
 
 require_commands() {
   local command_name
@@ -17,6 +19,16 @@ require_commands() {
       exit 1
     fi
   done
+}
+
+enable_wsl_rocm_dxg_detection() {
+  export HSA_ENABLE_DXG_DETECTION=1
+}
+
+enable_wsl_huggingface_compatibility() {
+  if grep -qiE '(microsoft|wsl)' /proc/sys/kernel/osrelease 2>/dev/null; then
+    export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
+  fi
 }
 
 setup_backend_dev_env() {
@@ -31,6 +43,8 @@ setup_backend_dev_env() {
   export APP_WHISPERX_MODEL_CACHE_DIR="${whisperx_cache_dir}"
   export HF_HOME="${hf_home}"
   export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${hf_home}}"
+  enable_wsl_rocm_dxg_detection
+  enable_wsl_huggingface_compatibility
 }
 
 require_backend_python() {

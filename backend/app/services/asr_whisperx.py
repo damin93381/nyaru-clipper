@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
+import tempfile
 import threading
 import time
 from collections.abc import Mapping
@@ -15,6 +17,7 @@ from app.paths import get_data_dir
 from app.repositories.tasks import get_task_record
 from app.services.runtime_profile import detect_runtime_profile
 from app.services.failure_codes import normalize_failure_code
+from app.services.media_chunks import MediaChunk
 from app.services.pipeline_support import append_stage_log, set_stage_status
 from app.services.storage import (
     ensure_task_dirs,
@@ -22,12 +25,22 @@ from app.services.storage import (
     persist_artifact_metadata,
     resolve_task_artifact_path,
 )
-from app.services.subtitles import SubtitleSegment, SubtitleWord, write_subtitle_outputs
+from app.services.subtitles import (
+    SubtitleSegment,
+    SubtitleWord,
+    build_internal_subtitle_json,
+    render_srt,
+    write_subtitle_outputs,
+)
 from app.settings import Settings, get_settings
 
 snapshot_download: Any | None = None
 download_faster_whisper_model: Any | None = None
 ASR_STAGE_SUCCESS_SUMMARY = "Generated aligned transcript and Chinese subtitles"
+ASR_CHUNK_OUTPUT_DIRECTORY = "asr-chunks"
+ASR_CHUNK_RESULT_MANIFEST_FILENAME = "asr-result.json"
+ASR_AGGREGATE_MANIFEST_FILENAME = "asr-aggregate-manifest.json"
+ASR_AGGREGATE_MANIFEST_SCHEMA_VERSION = 1
 
 
 @dataclass(slots=True)
@@ -78,10 +91,343 @@ class AsrResultManifest:
     error: dict[str, Any] | None
 
 
+@dataclass(frozen=True, slots=True)
+class MergedAsrArtifacts:
+    transcript_path: Path
+    subtitle_path: Path
+    aggregate_manifest_path: Path
+    segments: list[SubtitleSegment]
+    elapsed_seconds: float
+    model_metadata: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedMergedAsrArtifacts:
+    """Trusted source-global ASR outputs proven against every durable chunk result."""
+
+    transcript_path: Path
+    segments: list[SubtitleSegment]
+
+
 class AsrFailure(RuntimeError):
     def __init__(self, *, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+def merge_asr_chunk_segments(
+    chunks: list[tuple[MediaChunk, list[SubtitleSegment]]],
+) -> list[SubtitleSegment]:
+    """Rebase chunk-local captions onto source time and reject corrupted ordering."""
+    merged: list[SubtitleSegment] = []
+    previous_end_seconds = 0.0
+    for chunk, local_segments in chunks:
+        chunk_duration_seconds = chunk.end_seconds - chunk.start_seconds
+        for local_segment in local_segments:
+            _validate_chunk_local_segment(
+                local_segment,
+                chunk_duration_seconds=chunk_duration_seconds,
+                previous_end_seconds=previous_end_seconds - chunk.start_seconds,
+            )
+            global_start_seconds = chunk.start_seconds + local_segment.start_seconds
+            global_end_seconds = chunk.start_seconds + local_segment.end_seconds
+            words = _rebase_chunk_words(
+                local_segment.words,
+                chunk_start_seconds=chunk.start_seconds,
+                chunk_duration_seconds=chunk_duration_seconds,
+            )
+            merged.append(
+                SubtitleSegment(
+                    id=f"seg-{len(merged) + 1:06d}",
+                    start_seconds=global_start_seconds,
+                    end_seconds=global_end_seconds,
+                    text=local_segment.text,
+                    words=words,
+                )
+            )
+            previous_end_seconds = global_end_seconds
+    return merged
+
+
+def _validate_chunk_local_segment(
+    segment: SubtitleSegment,
+    *,
+    chunk_duration_seconds: float,
+    previous_end_seconds: float,
+) -> None:
+    if (
+        segment.start_seconds < 0
+        or segment.end_seconds < segment.start_seconds
+        or segment.end_seconds > chunk_duration_seconds
+        or segment.start_seconds < previous_end_seconds
+        or not segment.text.strip()
+    ):
+        raise AsrFailure(
+            code="invalid_chunk_output",
+            message="ASR chunk transcript contains non-monotonic, overlapping, or out-of-range segments.",
+        )
+
+
+def _rebase_chunk_words(
+    words: list[SubtitleWord] | None,
+    *,
+    chunk_start_seconds: float,
+    chunk_duration_seconds: float,
+) -> list[SubtitleWord] | None:
+    if words is None:
+        return None
+    rebased_words: list[SubtitleWord] = []
+    previous_end_seconds = 0.0
+    for word in words:
+        if (
+            word.start_seconds < 0
+            or word.end_seconds < word.start_seconds
+            or word.end_seconds > chunk_duration_seconds
+            or word.start_seconds < previous_end_seconds
+            or not word.text.strip()
+        ):
+            raise AsrFailure(
+                code="invalid_chunk_output",
+                message="ASR chunk transcript contains invalid word timestamps.",
+            )
+        rebased_words.append(
+            SubtitleWord(
+                text=word.text,
+                start_seconds=chunk_start_seconds + word.start_seconds,
+                end_seconds=chunk_start_seconds + word.end_seconds,
+                confidence=word.confidence,
+            )
+        )
+        previous_end_seconds = word.end_seconds
+    return rebased_words
+
+
+def asr_chunk_work_dir(work_dir: Path, chunk: MediaChunk) -> Path:
+    """Return the isolated task-local directory for one chunk ASR attempt."""
+    return work_dir / ASR_CHUNK_OUTPUT_DIRECTORY / chunk.id
+
+
+def load_valid_asr_chunk_manifest(task_id: str, *, work_dir: Path, chunk: MediaChunk) -> AsrResultManifest | None:
+    """Return a reusable successful child manifest only when all paths and transcript data validate."""
+    chunk_dir = asr_chunk_work_dir(work_dir, chunk)
+    manifest_path = chunk_dir / ASR_CHUNK_RESULT_MANIFEST_FILENAME
+    try:
+        manifest = load_asr_result_manifest(manifest_path)
+        if manifest.status != "success":
+            return None
+        if _require_manifest_path(task_id, manifest.artifacts.audio_path, kind="audio_path") != chunk.audio_path.resolve():
+            return None
+        transcript_path = _require_manifest_path(task_id, manifest.artifacts.transcript_path, kind="transcript_path")
+        subtitle_path = _require_manifest_path(task_id, manifest.artifacts.subtitle_path, kind="subtitle_path")
+        raw_alignment_path = _require_manifest_path(task_id, manifest.artifacts.raw_alignment_path, kind="raw_alignment_path")
+        expected_paths = {
+            transcript_path: chunk_dir / "asr-segments.json",
+            subtitle_path: chunk_dir / "subtitles.zh.srt",
+            raw_alignment_path: chunk_dir / "asr-alignment-raw.json",
+        }
+        if any(actual.resolve() != expected.resolve() for actual, expected in expected_paths.items()):
+            return None
+        _load_chunk_transcript_segments(transcript_path)
+    except AsrFailure:
+        return None
+    return manifest
+
+
+def merge_asr_chunk_artifacts(task_id: str, *, work_dir: Path, chunks: tuple[MediaChunk, ...]) -> MergedAsrArtifacts:
+    """Validate all durable chunk results, then atomically publish source-global ASR outputs."""
+    validated_chunks: list[tuple[MediaChunk, list[SubtitleSegment]]] = []
+    manifests: list[AsrResultManifest] = []
+    for chunk in chunks:
+        manifest = load_valid_asr_chunk_manifest(task_id, work_dir=work_dir, chunk=chunk)
+        if manifest is None:
+            raise AsrFailure(
+                code="invalid_chunk_output",
+                message=f"ASR chunk {chunk.id} is missing or invalid and must be re-run.",
+            )
+        transcript_path = _require_manifest_path(task_id, manifest.artifacts.transcript_path, kind="transcript_path")
+        validated_chunks.append((chunk, _load_chunk_transcript_segments(transcript_path)))
+        manifests.append(manifest)
+    segments = merge_asr_chunk_segments(validated_chunks)
+    elapsed_seconds = round(sum(manifest.elapsed_ms_total for manifest in manifests) / 1000, 3)
+    model_metadata = dict(manifests[-1].model_metadata) if manifests else {}
+    transcript_path = work_dir / "asr-segments.json"
+    subtitle_path = work_dir / "subtitles.zh.srt"
+    aggregate_manifest_path = work_dir / ASR_AGGREGATE_MANIFEST_FILENAME
+    _write_json_atomically(
+        transcript_path,
+        build_internal_subtitle_json(segments, model_metadata=model_metadata, elapsed_seconds=elapsed_seconds),
+    )
+    _write_text_atomically(subtitle_path, render_srt(segments))
+    _write_json_atomically(
+        aggregate_manifest_path,
+        {
+            "schema_version": ASR_AGGREGATE_MANIFEST_SCHEMA_VERSION,
+            "status": "success",
+            "chunk_count": len(chunks),
+            "chunk_ids": [chunk.id for chunk in chunks],
+            "elapsed_seconds": elapsed_seconds,
+            "model_metadata": model_metadata,
+            "segment_count": len(segments),
+        },
+    )
+    return MergedAsrArtifacts(
+        transcript_path=transcript_path,
+        subtitle_path=subtitle_path,
+        aggregate_manifest_path=aggregate_manifest_path,
+        segments=segments,
+        elapsed_seconds=elapsed_seconds,
+        model_metadata=model_metadata,
+    )
+
+
+def load_verified_merged_asr_artifacts(
+    task_id: str,
+    *,
+    work_dir: Path,
+    chunks: tuple[MediaChunk, ...],
+) -> VerifiedMergedAsrArtifacts:
+    """Return aggregate ASR rows only when they exactly match every validated chunk result."""
+    validated_chunks: list[tuple[MediaChunk, list[SubtitleSegment]]] = []
+    manifests: list[AsrResultManifest] = []
+    for chunk in chunks:
+        manifest = load_valid_asr_chunk_manifest(task_id, work_dir=work_dir, chunk=chunk)
+        if manifest is None:
+            raise AsrFailure(
+                code="invalid_chunk_output",
+                message=f"ASR chunk {chunk.id} is missing or invalid and must be re-run.",
+            )
+        transcript_path = _require_manifest_path(task_id, manifest.artifacts.transcript_path, kind="transcript_path")
+        validated_chunks.append((chunk, _load_chunk_transcript_segments(transcript_path)))
+        manifests.append(manifest)
+
+    expected_segments = merge_asr_chunk_segments(validated_chunks)
+    expected_elapsed_seconds = round(sum(manifest.elapsed_ms_total for manifest in manifests) / 1000, 3)
+    expected_model_metadata = dict(manifests[-1].model_metadata) if manifests else {}
+    transcript_path = work_dir / "asr-segments.json"
+    _validate_asr_aggregate_manifest(
+        work_dir=work_dir,
+        chunks=chunks,
+        expected_segments=expected_segments,
+        expected_elapsed_seconds=expected_elapsed_seconds,
+        expected_model_metadata=expected_model_metadata,
+    )
+    aggregate_segments = _load_verified_aggregate_transcript_segments(
+        transcript_path,
+        expected_elapsed_seconds=expected_elapsed_seconds,
+        expected_model_metadata=expected_model_metadata,
+        expected_segment_count=len(expected_segments),
+    )
+    if aggregate_segments != expected_segments:
+        raise AsrFailure(
+            code="invalid_chunk_output",
+            message="Aggregate ASR transcript does not match validated per-chunk ASR output.",
+        )
+    return VerifiedMergedAsrArtifacts(transcript_path=transcript_path, segments=expected_segments)
+
+
+def _validate_asr_aggregate_manifest(
+    *,
+    work_dir: Path,
+    chunks: tuple[MediaChunk, ...],
+    expected_segments: list[SubtitleSegment],
+    expected_elapsed_seconds: float,
+    expected_model_metadata: dict[str, Any],
+) -> None:
+    manifest_path = work_dir / ASR_AGGREGATE_MANIFEST_FILENAME
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AsrFailure(
+            code="invalid_chunk_output",
+            message="ASR aggregate manifest is unavailable or invalid.",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise AsrFailure(code="invalid_chunk_output", message="ASR aggregate manifest must be an object.")
+    if (
+        payload.get("schema_version") != ASR_AGGREGATE_MANIFEST_SCHEMA_VERSION
+        or payload.get("status") != "success"
+        or payload.get("chunk_count") != len(chunks)
+        or payload.get("chunk_ids") != [chunk.id for chunk in chunks]
+        or payload.get("elapsed_seconds") != expected_elapsed_seconds
+        or payload.get("segment_count") != len(expected_segments)
+        or payload.get("model_metadata") != expected_model_metadata
+    ):
+        raise AsrFailure(
+            code="invalid_chunk_output",
+            message="ASR aggregate manifest is stale or does not bind the validated chunk outputs.",
+        )
+
+
+def _load_verified_aggregate_transcript_segments(
+    transcript_path: Path,
+    *,
+    expected_elapsed_seconds: float,
+    expected_model_metadata: dict[str, Any],
+    expected_segment_count: int,
+) -> list[SubtitleSegment]:
+    """Load aggregate captions only when their deterministic metadata binds chunk outputs."""
+    try:
+        payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AsrFailure(code="invalid_chunk_output", message="Aggregate ASR transcript is unreadable.") from exc
+    if not isinstance(payload, dict):
+        raise AsrFailure(code="invalid_chunk_output", message="Aggregate ASR transcript must be an object.")
+    if (
+        payload.get("elapsed_seconds") != expected_elapsed_seconds
+        or payload.get("model_metadata") != expected_model_metadata
+        or payload.get("segment_count") != expected_segment_count
+    ):
+        raise AsrFailure(
+            code="invalid_chunk_output",
+            message="Aggregate ASR transcript metadata does not bind the validated chunk outputs.",
+        )
+    try:
+        return _normalize_aligned_segments(payload.get("segments"))
+    except AsrFailure as exc:
+        raise AsrFailure(code="invalid_chunk_output", message="Aggregate ASR transcript has invalid segments.") from exc
+
+
+def publish_merged_asr_artifacts(session: Session, *, task_id: str, artifacts: MergedAsrArtifacts) -> None:
+    """Register canonical merged ASR outputs without exposing chunk-local files as final artifacts."""
+    _persist_asr_artifacts(
+        session,
+        task_id=task_id,
+        audio_path=artifacts.aggregate_manifest_path,
+        transcript_path=artifacts.transcript_path,
+        subtitle_path=artifacts.subtitle_path,
+        raw_alignment_path=artifacts.aggregate_manifest_path,
+        model_metadata=artifacts.model_metadata,
+        elapsed_seconds=artifacts.elapsed_seconds,
+        segment_count=len(artifacts.segments),
+        language=str(artifacts.model_metadata.get("language") or ""),
+    )
+
+
+def _load_chunk_transcript_segments(transcript_path: Path) -> list[SubtitleSegment]:
+    try:
+        payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AsrFailure(code="invalid_chunk_output", message="ASR chunk transcript is unreadable.") from exc
+    raw_segments = payload.get("segments") if isinstance(payload, dict) else None
+    try:
+        return _normalize_aligned_segments(raw_segments)
+    except AsrFailure as exc:
+        raise AsrFailure(code="invalid_chunk_output", message="ASR chunk transcript has invalid segments.") from exc
+
+
+def _write_json_atomically(path: Path, payload: dict[str, Any]) -> None:
+    _write_text_atomically(path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def _write_text_atomically(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        Path(temporary_name).replace(path)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
 
 
 @dataclass(slots=True)
@@ -660,6 +1006,7 @@ def _persist_asr_outputs(
     model_metadata: dict[str, Any],
     elapsed_seconds: float,
 ) -> tuple[Path, Path]:
+    work_dir.mkdir(parents=True, exist_ok=True)
     raw_alignment_path.write_text(
         json.dumps(aligned_result, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
@@ -928,8 +1275,8 @@ def _normalize_aligned_segments(raw_segments: Any) -> list[SubtitleSegment]:
     for index, raw_segment in enumerate(raw_segments, start=1):
         if not isinstance(raw_segment, dict):
             raise AsrFailure(code="alignment_failed", message="WhisperX alignment returned an invalid segment payload.")
-        start_seconds = _coerce_float(raw_segment.get("start"))
-        end_seconds = _coerce_float(raw_segment.get("end"))
+        start_seconds = _coerce_float(raw_segment.get("start", raw_segment.get("start_seconds")))
+        end_seconds = _coerce_float(raw_segment.get("end", raw_segment.get("end_seconds")))
         text = str(raw_segment.get("text") or "").strip()
         if start_seconds is None or end_seconds is None or end_seconds < start_seconds or not text:
             raise AsrFailure(code="alignment_failed", message="WhisperX alignment returned a segment without usable timestamps.")
@@ -941,8 +1288,8 @@ def _normalize_aligned_segments(raw_segments: Any) -> list[SubtitleSegment]:
                 if not isinstance(raw_word, dict):
                     continue
                 word_text = str(raw_word.get("word") or raw_word.get("text") or "").strip()
-                word_start = _coerce_float(raw_word.get("start"))
-                word_end = _coerce_float(raw_word.get("end"))
+                word_start = _coerce_float(raw_word.get("start", raw_word.get("start_seconds")))
+                word_end = _coerce_float(raw_word.get("end", raw_word.get("end_seconds")))
                 if not word_text or word_start is None or word_end is None:
                     continue
                 words.append(

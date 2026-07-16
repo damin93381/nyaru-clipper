@@ -74,6 +74,8 @@ pnpm --dir web install --frozen-lockfile
 
 WSL 运行时启动仍然继续复用 `./scripts/dev_api.sh`、`./scripts/dev_worker.sh`、`./scripts/dev_web.sh`、`./scripts/dev_up.sh` 这组共用入口。
 
+WSL 安装器还会编译 WhisperX ASR 所需的 CTranslate2 HIP 后端。不能只看 Torch 是否通过：在评估 ASR 工作上限前，运行 `./scripts/check_wsl_rocm.sh`，并确认同时出现 `ctranslate2.cuda_device_count=1` 以及对配置的 `APP_WHISPERX_COMPUTE_TYPE`（默认 `float16`）的支持。这只是能力检查；变更 ROCm、模型或 GPU 硬件后，仍需用真实 ASR 任务验证。首次安装属于源码构建，需要 `git`、CMake、ROCm 开发库、OpenBLAS 头文件和 `readelf`。
+
 ### 分进程启动
 
 在仓库根目录执行：
@@ -102,7 +104,12 @@ docker compose -f infra/docker-compose.yml up -d --build api worker web
 - `VITE_PORT`：修改 Web 端口，默认 `5173`
 - `VITE_API_BASE_URL`：让浏览器访问正确的主机 API 地址
 - `APP_BILIBILI_COOKIE_PATH`：指定 Bilibili Cookie 文件路径
+- `APP_DEEPSEEK_API_KEY`：仅用于服务端字幕校对；绝不能设置在 `VITE_*` 变量、浏览器存储或任务表单中
 - `APP_DATA_DIR`：把数据目录放到仓库 `data/` 之外时使用
+- `APP_EXPORT_VIDEO_BACKEND=windows-amf`：让用户确认后的切片导出使用 Windows AMD AMF；默认仍是 `cpu`
+- `APP_WINDOWS_FFMPEG_BINARY`：指定 AMF 使用的 Windows `ffmpeg.exe`，例如 `/mnt/e/Program Files/ffmpeg-N-125573-g90436de5e1-win64-gpl-shared/bin/ffmpeg.exe`
+
+选择 AMF 后，导出器会把受管的 WSL 路径转换给 Windows 可执行文件，并使用 `h264_amf`。路径转换、编码器或输出校验失败会被写入日志，随后只回退一次到 CPU `libx264`；产物元数据会记录实际产出切片的后端和编码器。
 
 ### Web UI 的局域网访问说明
 
@@ -194,6 +201,8 @@ worker 会一次领取一个待处理的持久化任务。
 6. `export`
 7. `report`
 
+新建 v2 工作站任务的自动高光筛选是按任务配置的选项，默认**关闭**。仅在需要自动生成并排序候选片段时，才在新建任务抽屉中启用它。关闭后，规范的 `highlight` 阶段仍会显示，但会以 `skipped` 完成；候选产物状态会显示为 `not_applicable`，任务仍可正常成功完成。迁移前已存在的任务会保留自动高光筛选开启，以保持原有行为。
+
 在当前 MVP 中，流水线内的 `export` 阶段会先被标记为 `skipped`，直到用户通过 `POST /api/tasks/{task_id}/clips` 确认导出某个切片。
 
 ### 阶段状态更新与执行上下文
@@ -261,6 +270,26 @@ worker 会一次领取一个待处理的持久化任务。
 
 冷启动、模型下载，以及降级到 CPU 时的行为都和之前一致。CPU 或 GPU 的性能调优不在这一阶段范围内。
 
+## 五分钟 ASR、翻译与校对运维
+
+新任务的媒体准备会创建精确、任务本地的 300 秒 WAV 分片。单一 worker 依次处理这些分片：先 ASR，再翻译，最后对合并后的双语文本进行必需的 DeepSeek 校对。它会把片段和词级时间戳还原到原始视频时间轴；不会为了字幕计时替换或重编码源视频。
+
+任务运行期间，任务概览可以从 `execution_progress` 和阶段摘要显示安全的子步骤信息。`ASR 2/5` 和 `Translation 4/5` 表示已完成的工作分片数与任务总数。`Translation merge` 表示正在汇总每个分片的翻译，`Translation proofread` 表示必需的最终文本校对正在运行。这些字符串不会泄露 API Key、供应商请求头、提示词、原始响应、Cookie、主机路径或媒体载荷。
+
+DeepSeek Key 仅供后端使用。请在 API/worker 的进程环境或密钥存储中设置 `APP_DEEPSEEK_API_KEY`，绝不能放入浏览器、任务元数据、前端文件、产物或日志。校对时离开工作站的任务派生数据只有字幕文本、稳定行 ID 和时间戳；源视频与音频不会外发。固定的服务端提示词和原始供应商响应始终只保留在后端。
+
+### 恢复与失败处理
+
+- 重试会复用已完成且有效的分片。仅缺失、损坏或失败的 ASR/翻译分片会重新计算；已完成任务不会被重写。
+- 从 `translation` 重试会保留有效 ASR 输出，但会使旧的预校对/最终翻译发布结果失效，避免过期最终字幕显示为当前结果。
+- `translation_proofread_missing_api_key`：添加仅后端可用的 Key，重启读取它的 API/worker 进程，然后重试 `translation`。
+- `translation_proofread_auth_failed`（401）：修正供应商凭据后重试 `translation`。
+- `translation_proofread_billing_failed`（402）：处理供应商计费后重试 `translation`。
+- `translation_proofread_rate_limit`、`translation_proofread_timeout` 和 `translation_proofread_transient_exhausted`：等待供应商临时状态恢复后重试 `translation`。内置供应商重试次数有上限。
+- `translation_proofread_invalid_response`：解决供应商问题后重试 `translation`。顺序变化、修改时间戳、空文本和格式错误的响应都会被拒绝。
+
+校对是最终双语发布的必经步骤。校对失败时，系统不会静默提升预校对诊断字幕；高光、报告和导出只使用经验证的最终双语产物。
+
 ## 运行时能力可见性
 
 运行时能力检查是非阻塞的可见性信号。
@@ -301,6 +330,8 @@ rocminfo
 ls -l /dev/dxg /dev/kfd
 /home/drm/workfile/nyaru-clipper/backend/.venv/bin/python -m torch.utils.collect_env
 ```
+
+本仓库的 WSL profile 目标是 AMD ROCm 7.2 轮子仓库。对于 7.13 之前的 ROCm，当 ROCDXG 和 `/dev/dxg` 同时存在时，共用入口与 doctor 会自动启用 `HSA_ENABLE_DXG_DETECTION=1`。若不经由这些脚本直接启动 Python 或 Uvicorn，也应导出同一变量。
 
 WSL 上有一种常见失败模式是：`rocminfo` 已经能看到 AMD GPU，但 torch 仍然打不开设备。这时应先在专用后端环境里应用 AMD 文档提到的 HSA 运行库替换：
 

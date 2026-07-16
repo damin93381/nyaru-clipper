@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from app.services.subtitles import (
     SubtitleSegment,
@@ -8,6 +11,7 @@ from app.services.subtitles import (
     build_bilingual_subtitle_json,
     render_bilingual_srt,
     write_bilingual_subtitle_outputs,
+    write_bilingual_subtitle_outputs_atomically,
 )
 
 
@@ -110,3 +114,30 @@ def test_build_bilingual_json_preserves_original_words_and_metadata() -> None:
             }
         ],
     }
+
+
+def test_atomic_bilingual_publish_removes_both_canonical_files_when_second_replace_fails(tmp_path, monkeypatch) -> None:
+    # Given: a canonical pair whose SRT replacement fails after the JSON replacement succeeds.
+    original_replace = Path.replace
+
+    def _fail_second_replace(source: Path, target: Path) -> Path:
+        if target.name == "subtitles.zh-ja.srt":
+            raise OSError("injected final SRT replacement failure")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", _fail_second_replace)
+    segments = [SubtitleSegment(id="seg-0001", start_seconds=0.0, end_seconds=1.0, text="你好")]
+
+    # When: the final publication attempts to replace both canonical files.
+    with pytest.raises(OSError, match="injected final SRT"):
+        write_bilingual_subtitle_outputs_atomically(
+            tmp_path,
+            segments,
+            ["こんにちは"],
+            model_metadata={"provider": "test"},
+            elapsed_seconds=0.1,
+        )
+
+    # Then: neither half of the canonical pair is left published.
+    assert not (tmp_path / "subtitles.zh-ja.json").exists()
+    assert not (tmp_path / "subtitles.zh-ja.srt").exists()

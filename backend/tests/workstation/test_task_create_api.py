@@ -77,7 +77,45 @@ def test_v2_task_creation_persists_bilibili_source_and_complete_workstation_life
     assert response.status_code == 201
     assert response.json()["profile_id"] == "standard"
     assert response.json()["priority"] == 10
+    assert response.json()["highlight_filtering_enabled"] is False
     _assert_created_task_records(response.json()["task_id"], expected_kind="bilibili", expected_priority=10)
+
+    from app.db import session_scope
+    from app.models import Task
+
+    with session_scope() as session:
+        task = session.get(Task, response.json()["task_id"])
+        highlight_filtering_enabled = task.highlight_filtering_enabled if task is not None else None
+
+    assert task is not None
+    assert highlight_filtering_enabled is False
+
+
+def test_v2_task_creation_persists_requested_highlight_filtering(client: TestClient) -> None:
+    # Given: a valid source that explicitly requests automatic candidate generation.
+    payload = {
+        "source": {"kind": "bilibili", "url": "https://www.bilibili.com/video/BV1highlights"},
+        "profile_id": "standard",
+        "priority": 0,
+        "highlight_filtering_enabled": True,
+    }
+
+    # When: the operator creates the workstation task.
+    response = client.post("/api/v2/tasks", json=payload)
+
+    # Then: the API response and durable task record preserve the requested option.
+    assert response.status_code == 201
+    assert response.json()["highlight_filtering_enabled"] is True
+
+    from app.db import session_scope
+    from app.models import Task
+
+    with session_scope() as session:
+        task = session.get(Task, response.json()["task_id"])
+        highlight_filtering_enabled = task.highlight_filtering_enabled if task is not None else None
+
+    assert task is not None
+    assert highlight_filtering_enabled is True
 
 
 def test_v2_task_creation_revalidates_local_source_before_persisting_reference(client: TestClient) -> None:

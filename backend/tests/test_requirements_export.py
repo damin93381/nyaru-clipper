@@ -14,6 +14,8 @@ OPENAPI_EXPORT_SCRIPT = REPO_ROOT / "scripts" / "export_openapi_schema.py"
 WEB_DIR = REPO_ROOT / "web"
 CUDA_PROFILE_PATH = REPO_ROOT / "backend" / "requirements-linux-cuda.txt"
 WSL_ROCM_PROFILE_PATH = REPO_ROOT / "backend" / "requirements-wsl-rocm.txt"
+WSL_ROCM_INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install_backend_wsl_rocm.sh"
+DEV_COMMON_SCRIPT = REPO_ROOT / "scripts" / "_dev_common.sh"
 
 ACCELERATOR_PACKAGE_NAMES = {
     "ctranslate2",
@@ -30,6 +32,16 @@ PACKAGE_NAME_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
 def _run_export(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(EXPORT_SCRIPT), *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_wsl_rocm_install(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(WSL_ROCM_INSTALL_SCRIPT), *args],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -195,6 +207,23 @@ def test_checked_in_wsl_rocm_profile_artifact_contains_rocm_torch_without_nvidia
     assert "whisperx" in package_names
     assert any("rocm" in line.lower() for line in lines)
     assert not any(name.startswith(ACCELERATOR_PACKAGE_PREFIXES) for name in package_names)
+
+
+def test_wsl_rocm_installer_dry_run_includes_hip_ctranslate2_build() -> None:
+    result = _run_wsl_rocm_install("--dry-run")
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    output = result.stdout + result.stderr
+    assert "build_ctranslate2_wsl_rocm.sh" in output
+    assert "-DWITH_HIP=ON" in output
+    assert "-DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++" in output
+    assert "-DCMAKE_PREFIX_PATH=/opt/rocm" in output
+
+
+def test_shared_runtime_environment_unconditionally_exports_wsl_dxg_detection() -> None:
+    script = DEV_COMMON_SCRIPT.read_text(encoding="utf-8")
+
+    assert "enable_wsl_rocm_dxg_detection() {\n  export HSA_ENABLE_DXG_DETECTION=1\n}" in script
 
 
 def test_profile_artifacts_keep_shared_dependency_pins_consistent_with_base_artifact() -> None:

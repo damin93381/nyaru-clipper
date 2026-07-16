@@ -26,6 +26,7 @@ import { TaskOverviewInspector } from "../TaskOverviewInspector";
 
 const overview = {
   archived_at: null,
+  highlight_filtering_enabled: true,
   artifact_readiness: [
     { artifact_id: 1, kind: "transcript_json", path: "/api/tasks/task-overview/artifacts/1/content/asr-segments.json", stage_name: "asr", status: "ready" },
     { artifact_id: 2, kind: "bilingual_transcript_json", path: "/api/tasks/task-overview/artifacts/2/content/subtitles.zh-ja.json", stage_name: "translation", status: "ready" },
@@ -93,6 +94,22 @@ describe("TaskOverviewPage", () => {
     expect(screen.getByText("こんにちは")).toBeVisible();
     expect(screen.getByRole("region", { name: "字幕表格，可横向滚动" })).toHaveAttribute("tabindex", "0");
     expect(screen.getByText("暂无可用高光候选")).toBeVisible();
+  });
+
+  it("explains that automatic highlight filtering was disabled without treating its artifact as missing", async () => {
+    vi.mocked(getWorkstationTaskOverview).mockResolvedValue({
+      ...overview,
+      artifact_readiness: overview.artifact_readiness.map((record) => record.kind === "highlight_candidates_json" ? { ...record, artifact_id: null, path: null, status: "not_applicable" as const } : record),
+      artifacts: overview.artifacts.filter((artifact) => artifact.kind !== "highlight_candidates_json"),
+      highlight_filtering_enabled: false,
+      stages: overview.stages.map((stage) => stage.name === "highlight" ? { ...stage, finished_at: "2026-07-12T03:03:00Z", planned: false, status: "skipped" as const, summary: "Automatic highlight filtering disabled for this task" } : stage),
+      status: "success",
+    });
+
+    renderOverview();
+
+    expect(await screen.findByText("此任务未启用自动高光筛选，因此不会生成候选片段。")).toBeVisible();
+    expect(screen.queryByText("产物缺失，可重试生成阶段")).not.toBeInTheDocument();
   });
 
   it("keeps Chinese postpositional title phrases together without changing the accessible title", async () => {

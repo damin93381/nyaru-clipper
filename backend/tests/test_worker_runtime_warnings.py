@@ -84,6 +84,29 @@ def _extract_runtime_summary(summary: str | None) -> dict[str, object]:
     return json.loads(summary.removeprefix(prefix))
 
 
+def test_worker_loop_keeps_running_after_a_task_execution_failure(monkeypatch) -> None:
+    from app import worker
+
+    calls: list[str] = []
+
+    def fake_iteration(*, processor=None):
+        calls.append("iteration")
+        if len(calls) == 1:
+            raise RuntimeError("download timed out")
+        raise KeyboardInterrupt
+
+    logged_failures: list[str] = []
+    monkeypatch.setattr(worker, "run_worker_iteration", fake_iteration)
+    monkeypatch.setattr(worker.time, "sleep", lambda _seconds: calls.append("sleep"))
+    monkeypatch.setattr(worker.worker_logger, "exception", lambda message: logged_failures.append(message))
+
+    with pytest.raises(KeyboardInterrupt):
+        worker.worker_loop(poll_interval=0)
+
+    assert calls == ["iteration", "sleep", "iteration"]
+    assert logged_failures == ["worker iteration failed"]
+
+
 def test_worker_iteration_surfaces_runtime_warnings_in_stage_log_summary(backend_env, monkeypatch) -> None:
     task_id = _create_task("https://www.bilibili.com/video/BV1workerwarn001")
 

@@ -57,12 +57,24 @@ def _prepare_audio_fixture(data_dir: Path, task_id: str) -> Path:
     return audio_path
 
 
+def _prepare_media_chunk_fixture(data_dir: Path, task_id: str) -> Path:
+    from app.services.media_chunks import build_media_chunk_manifest, write_media_chunk_manifest_atomically
+
+    work_dir = data_dir / "tasks" / task_id / "work"
+    manifest = build_media_chunk_manifest(10.0, work_dir=work_dir)
+    audio_path = manifest.chunks[0].audio_path
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    audio_path.write_bytes(b"RIFFfixture")
+    write_media_chunk_manifest_atomically(work_dir / "media-chunks.json", manifest)
+    return audio_path
+
+
 class _FakeModel:
     def __init__(self, transcription_result: dict):
         self.transcription_result = transcription_result
 
     def transcribe(self, audio_path: str, *, batch_size: int, language: str) -> dict:
-        assert audio_path.endswith("asr-input.wav")
+        assert audio_path.endswith(".wav")
         assert batch_size >= 1
         return {
             **self.transcription_result,
@@ -106,7 +118,7 @@ class _FakeWhisperX:
         return_char_alignments: bool,
     ) -> dict:
         assert segments == self.transcription_result["segments"]
-        assert audio_path.endswith("asr-input.wav")
+        assert audio_path.endswith(".wav")
         assert metadata["language_code"] == "zh"
         assert device == "cpu"
         assert return_char_alignments is False
@@ -498,7 +510,7 @@ def test_transcribe_uses_recovery_target_directories_when_models_are_present_loc
 
 def test_child_runner_emits_success_protocol_and_manifest(backend_env, monkeypatch, capsys) -> None:
     task_id = _create_task("https://www.bilibili.com/video/BV1childsuccess001")
-    _prepare_audio_fixture(Path(backend_env["data_dir"]), task_id)
+    _prepare_media_chunk_fixture(Path(backend_env["data_dir"]), task_id)
     fake_whisperx = _FakeWhisperX(
         transcription_result={
             "segments": [
@@ -521,12 +533,19 @@ def test_child_runner_emits_success_protocol_and_manifest(backend_env, monkeypat
         clock["value"] += 0.25
         return clock["value"]
 
+    original_load_model = fake_whisperx.load_model
+
+    def noisy_load_model(*args, **kwargs):
+        print("third-party model startup notice")
+        return original_load_model(*args, **kwargs)
+
+    monkeypatch.setattr(fake_whisperx, "load_model", noisy_load_model)
     monkeypatch.setattr("app.services.asr_whisperx._load_whisperx_module", lambda: fake_whisperx)
     monkeypatch.setattr("app.services.asr_whisperx.time.perf_counter", _fake_perf_counter)
 
     from app.services.asr_child_runner import run_asr_child
 
-    result = run_asr_child(task_id)
+    result = run_asr_child(task_id, 0)
 
     captured = capsys.readouterr()
     events = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
@@ -583,15 +602,17 @@ def test_child_runner_emits_success_protocol_and_manifest(backend_env, monkeypat
     assert manifest["elapsed_ms_total"] > 0
     assert [phase["name"] for phase in manifest["phases"]] == ["model_load", "vad", "transcribe", "align", "persist"]
     assert all(phase["status"] == "success" for phase in manifest["phases"])
-    assert manifest["artifacts"]["transcript_path"].endswith("asr-segments.json")
+    assert manifest["artifacts"]["transcript_path"].endswith("asr-chunks/chunk-0000/asr-segments.json")
     assert manifest["artifacts"]["subtitle_path"].endswith("subtitles.zh.srt")
     assert manifest["artifacts"]["raw_alignment_path"].endswith("asr-alignment-raw.json")
     assert manifest["model_metadata"]["model_name"] == "large-v3"
     assert manifest["error"] is None
+    assert "third-party model startup notice" in captured.err
 
 
 def test_child_runner_emits_classified_failure_protocol(backend_env, monkeypatch, capsys) -> None:
     task_id = _create_task("https://www.bilibili.com/video/BV1childfailure001")
+    _prepare_media_chunk_fixture(Path(backend_env["data_dir"]), task_id).unlink()
     clock = {"value": 200.0}
 
     def _fake_perf_counter() -> float:
@@ -602,7 +623,7 @@ def test_child_runner_emits_classified_failure_protocol(backend_env, monkeypatch
 
     from app.services.asr_child_runner import run_asr_child
 
-    result = run_asr_child(task_id)
+    result = run_asr_child(task_id, 0)
 
     captured = capsys.readouterr()
     events = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
@@ -634,7 +655,58 @@ def test_child_runner_rejects_noncanonical_task_id(backend_env) -> None:
     from app.services.asr_child_runner import run_asr_child
 
     with pytest.raises(ValueError, match="Invalid task_id"):
-        run_asr_child("../escape")
+        run_asr_child("../escape", 0)
+
+
+def test_merge_asr_chunk_segments_rebases_times_and_assigns_global_ids() -> None:
+    # Given: two contiguous chunk-local transcript payloads with duplicate local IDs.
+    from app.services.asr_whisperx import merge_asr_chunk_segments
+    from app.services.media_chunks import MediaChunk
+    from app.services.subtitles import SubtitleSegment, SubtitleWord
+
+    chunks = [
+        (
+            MediaChunk(0, 0.0, 300.0, Path("/tmp/chunk-0000.wav")),
+            [SubtitleSegment("seg-0001", 1.0, 2.0, "第一句", [SubtitleWord("第一", 1.0, 1.5)])],
+        ),
+        (
+            MediaChunk(1, 300.0, 301.0, Path("/tmp/chunk-0001.wav")),
+            [SubtitleSegment("seg-0001", 0.0, 0.5, "第二句", [SubtitleWord("第二", 0.0, 0.5)])],
+        ),
+    ]
+
+    # When: the parent merges the validated chunk transcripts.
+    merged = merge_asr_chunk_segments(chunks)
+
+    # Then: timestamps are source-global and IDs are unique and ordered.
+    assert [(segment.id, segment.start_seconds, segment.end_seconds) for segment in merged] == [
+        ("seg-000001", 1.0, 2.0),
+        ("seg-000002", 300.0, 300.5),
+    ]
+    assert merged[1].words is not None
+    assert merged[1].words[0].start_seconds == 300.0
+
+
+def test_merge_asr_chunk_segments_rejects_overlapping_global_output() -> None:
+    # Given: a chunk transcript whose local segments overlap.
+    from app.services.asr_whisperx import AsrFailure, merge_asr_chunk_segments
+    from app.services.media_chunks import MediaChunk
+    from app.services.subtitles import SubtitleSegment
+
+    chunks = [
+        (
+            MediaChunk(0, 0.0, 10.0, Path("/tmp/chunk-0000.wav")),
+            [
+                SubtitleSegment("a", 1.0, 3.0, "甲"),
+                SubtitleSegment("b", 2.0, 4.0, "乙"),
+            ],
+        )
+    ]
+
+    # When / Then: corrupted output cannot reach the canonical transcript.
+    with pytest.raises(AsrFailure) as raised:
+        merge_asr_chunk_segments(chunks)
+    assert raised.value.code == "invalid_chunk_output"
 
 
 def test_run_pipeline_phase_emits_ongoing_heartbeats_during_long_running_work(monkeypatch) -> None:

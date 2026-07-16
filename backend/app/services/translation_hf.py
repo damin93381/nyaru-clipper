@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from app.services.subtitles import SubtitleSegment
@@ -62,8 +63,24 @@ class HuggingFaceTranslationProvider:
             with torch.inference_mode():
                 generated_tokens = model.generate(
                     **moved_inputs,
-                    forced_bos_token_id=tokenizer.lang_code_to_id[self.target_language_code],
+                    forced_bos_token_id=_target_language_token_id(tokenizer, self.target_language_code),
                     max_new_tokens=self.max_new_tokens,
                 )
             translated.append(tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0].strip())
         return translated
+
+
+def _target_language_token_id(tokenizer: object, language_code: str) -> int:
+    legacy_mapping = getattr(tokenizer, "lang_code_to_id", None)
+    if isinstance(legacy_mapping, Mapping):
+        token_id = legacy_mapping.get(language_code)
+        if isinstance(token_id, int):
+            return token_id
+
+    convert_tokens_to_ids = getattr(tokenizer, "convert_tokens_to_ids", None)
+    if callable(convert_tokens_to_ids):
+        token_id = convert_tokens_to_ids(language_code)
+        if isinstance(token_id, int):
+            return token_id
+
+    raise ValueError(f"Tokenizer does not provide an ID for target language '{language_code}'.")

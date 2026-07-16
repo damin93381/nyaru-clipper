@@ -118,6 +118,25 @@ pnpm --dir web install --frozen-lockfile
 - `VITE_API_BASE_URL`，默认 `http://127.0.0.1:8000/api`
 - `APP_DATA_DIR`，需要把数据目录放到 `./data` 之外时使用
 - `APP_BILIBILI_COOKIE_PATH`，下载必须依赖 Cookie 文件时使用
+- `APP_DEEPSEEK_API_KEY`，必需的服务端字幕校对步骤使用；绝不能设置在 `VITE_*`、浏览器存储或任务表单中
+
+### 从 WSL 可选使用 Windows AMD AMF 导出切片
+
+在 AMD WSL 工作站上，只有用户确认后的切片导出可以可选使用 Windows 的 AMF 媒体编码器；ASR 与媒体预处理仍在 WSL 内运行。必须显式配置 Windows 可执行文件，不能依赖刚修改过的 Windows `PATH` 能立刻被 WSL 继承：
+
+```bash
+export APP_EXPORT_VIDEO_BACKEND=windows-amf
+export APP_WINDOWS_FFMPEG_BINARY='/mnt/e/Program Files/ffmpeg-N-125573-g90436de5e1-win64-gpl-shared/bin/ffmpeg.exe'
+./scripts/dev_up.sh
+```
+
+请将路径替换为实际安装的 `ffmpeg.exe`。启动工作站前，先验证该 Windows 构建公开了 AMF：
+
+```bash
+"$APP_WINDOWS_FFMPEG_BINARY" -hide_banner -encoders | rg 'h264_amf'
+```
+
+导出服务会用 `wslpath -w` 转换受管的 WSL 输入/输出路径，使用 `h264_amf`，并在导出产物元数据中记录实际后端。若 AMF 配置、路径转换、进程执行或输出校验失败，服务会记录原因并仅回退一次到已有的 WSL `libx264` 命令。`APP_EXPORT_VIDEO_BACKEND` 默认仍是 `cpu`。
 
 如果浏览器从局域网其他机器访问 Web UI，请在启动前把 `VITE_API_BASE_URL` 改成主机局域网地址，例如：
 
@@ -149,7 +168,9 @@ WSL 路径分成四步：
 pnpm --dir web install --frozen-lockfile
 ```
 
-不要在 WSL 上只执行 `uv sync --project backend --frozen` 就认为后端已经安装完成。专用包装脚本会应用仓库里检查通过的 WSL ROCm 依赖路径。
+不要在 WSL 上只执行 `uv sync --project backend --frozen` 就认为后端已经安装完成。专用包装脚本会应用仓库里检查通过的 WSL ROCm 依赖路径，并为自动检测到的 AMD `gfx` 目标以 HIP 后端编译 CTranslate2 `4.8.1`。
+
+这一步源码构建是 GPU ASR 的必要条件：PyPI 的普通 CTranslate2 wheel 只有 CUDA 后端，即使 ROCm Torch 已经能看到 GPU，WhisperX/faster-whisper 仍会回退到 CPU。首次安装因此需要 `git`、CMake、ROCm 开发库、OpenBLAS 头文件和 `readelf`，耗时也会明显长于普通依赖同步。不可变的 CTranslate2 源码缓存位于 `${XDG_CACHE_HOME:-$HOME/.cache}/nyaru-clipper/`；构建和 wheel 输出会按后端环境、AMD `gfx` 目标和 ROCm Clang 版本隔离。可用 `APP_CTRANSLATE2_BUILD_ROOT` 迁移构建输出，用 `APP_CTRANSLATE2_SOURCE_ROOT` 迁移源码缓存，或用 `APP_CTRANSLATE2_HIP_ARCHITECTURE` 覆盖 `rocminfo` 的自动目标检测。
 
 ### 2. 运行严格的 WSL doctor
 
@@ -164,10 +185,22 @@ pnpm --dir web install --frozen-lockfile
 - `WSL_ROCM_READY`
 - `torch.build_family=rocm`
 - `torch.cuda.is_available=True`
+- `ctranslate2.cuda_device_count=1`
+- `ctranslate2.cuda_compute_types=` 中包含 `float16`
 
 如果这个命令失败，不要继续启动运行时，先修复 mismatch。
 
+doctor 是快速能力门槛：它会将配置的 `APP_WHISPERX_COMPUTE_TYPE`（默认 `float16`）与 CTranslate2 可见 GPU 支持进行核对。它不能替代真实 ASR 任务；在升级 ROCm、模型版本或更换硬件后，仍应通过实际任务完成模型加载与推理的最终验证。
+
 ### `hip_build_no_device` 的 WSL 专项修复
+
+仓库内置的 WSL profile 使用 AMD ROCm 7.2 轮子仓库，应与 ROCm 7.2 WSL 主机保持一致。ROCm 6.4 的 torch 虽然可能成功导入，但在 ROCm 7.2 主机上初始化 GPU 时可能卡住。
+
+对于 7.13 之前的 ROCm 版本，AMD 的 ROCDXG 指引还要求设置 `HSA_ENABLE_DXG_DETECTION=1`。当共用后端启动脚本或 `check_wsl_rocm.sh` 同时检测到 WSL、`/dev/dxg` 和 `/opt/rocm/lib/librocdxg.so` 时，会自动设置该变量。若直接启动 Python 或 Uvicorn，请先执行：
+
+```bash
+export HSA_ENABLE_DXG_DETECTION=1
+```
 
 如果 `./scripts/check_wsl_rocm.sh` 报告 `hip_build_no_device`，不要立刻认定是后端装错了 torch wheel。在 WSL 主机上，即使满足下面这些条件，也仍然可能出现这个失败：
 
@@ -398,6 +431,33 @@ warning 的含义如下：
 - 如果后端当前没有跟踪到活动中的 ASR 执行，那么 `execution_progress` 可以完全不存在
 
 这一阶段不会改变 CPU 或 GPU 的调优行为。当前用于保质量的模型、设备和计算默认值保持不变，性能优化工作仍然不在本阶段范围内。
+
+## 五分钟字幕分片与必需文本校对
+
+新任务会创建精确、任务本地的 300 秒 WAV 工作分片。单一 worker 依次运行每个分片的 WhisperX 与翻译，然后将所有字幕时间戳还原到原始视频时间轴。原始视频不会被改写。
+
+已完成且校验通过的分片产物可以复用。重试会保留有效上游分片，仅重新处理缺失或无效的 ASR/翻译分片；从 `translation` 重试会保留有效 ASR 输出，但会先移除过期的最终双语发布结果。七个规范顶层阶段不会改变。
+
+逐分片翻译合并后，后端向 DeepSeek 发送的任务派生数据只有双语字幕文本、稳定行 ID 与时间戳，用于必需的校对步骤。不会发送源视频、音频、Cookie、主机路径、API Key 或浏览器状态。固定的服务端提示词和原始供应商响应始终只保留在后端。浏览器只会看到安全的阶段进度/摘要，例如 `ASR 2/5`、`Translation 4/5`、`Translation merge` 和 `Translation proofread`。
+
+仅在启动 API 与 worker 的进程环境中设置供应商 Key：
+
+```bash
+export APP_DEEPSEEK_API_KEY='请在 shell 或密钥存储中设置'
+./scripts/dev_up.sh
+```
+
+不要把 Key 放入 `VITE_*` 变量、前端 `.env` 文件、任务载荷、浏览器存储、日志或产物。worker 通过配置的服务端端点使用 `deepseek-v4-flash`；浏览器中不存在供应商控制项。
+
+如果校对期间翻译失败，请使用安全失败码和阶段日志摘要恢复：
+
+- `translation_proofread_missing_api_key`：将 Key 添加到后端/worker 环境，重启这些进程后重试 `translation`。
+- `translation_proofread_auth_failed`（401）：修正后端/worker 凭据后重试 `translation`。
+- `translation_proofread_billing_failed`（402）：处理供应商账户或计费问题后重试 `translation`。
+- `translation_proofread_rate_limit`、`translation_proofread_timeout` 或 `translation_proofread_transient_exhausted`：等待供应商恢复后重试 `translation`；重试次数有上限。
+- `translation_proofread_invalid_response`：确认供应商恢复正常后重试 `translation`。格式错误、顺序变化、修改时间戳或空文本响应都会被拒绝，绝不会发布为最终字幕。
+
+校对失败时，系统不会静默回退到预校对诊断字幕。高光、报告和导出只使用经验证的最终双语产物。
 
 ## 验证命令
 

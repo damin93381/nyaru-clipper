@@ -118,6 +118,25 @@ Useful environment overrides:
 - `VITE_API_BASE_URL`, default `http://127.0.0.1:8000/api`
 - `APP_DATA_DIR` if you want storage outside `./data`
 - `APP_BILIBILI_COOKIE_PATH` if downloads require a cookie file
+- `APP_DEEPSEEK_API_KEY` for the required server-side subtitle proofreading pass; never set it in `VITE_*`, browser storage, or a task form
+
+### Optional Windows AMD AMF clip export from WSL
+
+On an AMD WSL workstation, only confirmed clip export can optionally use Windows' AMF media encoder. ASR and media preparation continue to run inside WSL. Configure the Windows executable explicitly; do not rely on a newly changed Windows `PATH` being inherited by WSL:
+
+```bash
+export APP_EXPORT_VIDEO_BACKEND=windows-amf
+export APP_WINDOWS_FFMPEG_BINARY='/mnt/e/Program Files/ffmpeg-N-125573-g90436de5e1-win64-gpl-shared/bin/ffmpeg.exe'
+./scripts/dev_up.sh
+```
+
+Replace the path with the installed `ffmpeg.exe`. Before starting the workstation, verify that its Windows build exposes AMF:
+
+```bash
+"$APP_WINDOWS_FFMPEG_BINARY" -hide_banner -encoders | rg 'h264_amf'
+```
+
+The export service converts its managed WSL source/output paths with `wslpath -w`, uses `h264_amf`, and records the actual backend in the export artifact metadata. If AMF configuration, path conversion, process execution, or output validation fails, it logs the reason and retries once with the existing WSL `libx264` command. `cpu` remains the default value of `APP_EXPORT_VIDEO_BACKEND`.
 
 For LAN browser access from another machine, set `VITE_API_BASE_URL` to the host LAN address before starting the web server, for example:
 
@@ -149,7 +168,9 @@ From the repo root inside WSL:
 pnpm --dir web install --frozen-lockfile
 ```
 
-Do not rely on a plain `uv sync --project backend --frozen` backend install on WSL. The dedicated wrapper applies the checked-in WSL ROCm dependency path.
+Do not rely on a plain `uv sync --project backend --frozen` backend install on WSL. The dedicated wrapper applies the checked-in WSL ROCm dependency path and then builds CTranslate2 `4.8.1` with the HIP backend for the detected AMD `gfx` target.
+
+This source build is required for GPU ASR: the normal PyPI CTranslate2 wheel is CUDA-only, so WhisperX/faster-whisper otherwise falls back to CPU even when ROCm Torch can see the GPU. The first install therefore requires `git`, CMake, the ROCm development libraries, OpenBLAS headers, and `readelf`, and takes longer than a normal dependency sync. The immutable CTranslate2 source cache is stored below `${XDG_CACHE_HOME:-$HOME/.cache}/nyaru-clipper/`; its build and wheel outputs are isolated by backend environment, AMD `gfx` target, and ROCm Clang version. Set `APP_CTRANSLATE2_BUILD_ROOT` to relocate those build outputs, `APP_CTRANSLATE2_SOURCE_ROOT` to relocate the source cache, or `APP_CTRANSLATE2_HIP_ARCHITECTURE` to override automatic `rocminfo` target detection.
 
 ### 2. Run the strict WSL doctor
 
@@ -164,10 +185,22 @@ Expected success output includes:
 - `WSL_ROCM_READY`
 - `torch.build_family=rocm`
 - `torch.cuda.is_available=True`
+- `ctranslate2.cuda_device_count=1`
+- `ctranslate2.cuda_compute_types=` containing `float16`
 
 If this command fails, do not continue into runtime startup until the mismatch is fixed.
 
+The doctor is a fast capability gate: it checks the configured `APP_WHISPERX_COMPUTE_TYPE` (default `float16`) against CTranslate2's visible GPU support. It does not replace processing a real ASR task, which remains the final model/load/inference validation after changing ROCm, model versions, or hardware.
+
 ### WSL-specific remediation for `hip_build_no_device`
+
+The checked-in WSL profile uses AMD's ROCm 7.2 wheel repository. Keep this profile aligned with a ROCm 7.2 WSL host; a ROCm 6.4 torch wheel can import successfully but hang while initializing a GPU on a ROCm 7.2 host.
+
+On ROCm releases before 7.13, AMD's ROCDXG guidance also requires `HSA_ENABLE_DXG_DETECTION=1`. The shared backend entrypoints and `check_wsl_rocm.sh` set it automatically when they detect WSL, `/dev/dxg`, and `/opt/rocm/lib/librocdxg.so`. If launching Python or Uvicorn directly, export it first:
+
+```bash
+export HSA_ENABLE_DXG_DETECTION=1
+```
 
 If `./scripts/check_wsl_rocm.sh` reports `hip_build_no_device`, do not immediately assume the backend installed the wrong torch wheel. A WSL host can still fail this check even when:
 
@@ -398,6 +431,33 @@ Interpretation rules:
 - if no live ASR execution is being tracked, `execution_progress` can be absent entirely
 
 This phase does not change CPU or GPU tuning behavior. It keeps the current quality-preserving model, device, and compute defaults. Performance optimization work is out of scope here.
+
+## Five-minute subtitles and required text proofreading
+
+New runs create exact, task-local 300-second WAV work slices. The single worker runs WhisperX and translation one slice at a time, then restores every subtitle timestamp to the original source timeline. The original video is unchanged.
+
+Completed valid slice artifacts are reusable. A retry keeps valid upstream slices and redoes only missing or invalid ASR/translation slice results; retrying `translation` keeps valid ASR output but removes stale final bilingual publication before it starts again. The seven canonical top-level stages do not change.
+
+After the per-slice translation merge, the only task-derived data the backend sends to DeepSeek are bilingual subtitle text, stable row IDs, and timestamps. It does not send source video, audio, cookies, host paths, API keys, or browser state. The fixed server prompt and raw provider response remain backend-only. The browser receives only safe stage progress/summaries such as `ASR 2/5`, `Translation 4/5`, `Translation merge`, and `Translation proofread`.
+
+Set the provider key only in the process environment that starts the API and worker:
+
+```bash
+export APP_DEEPSEEK_API_KEY='set-this-in-your-shell-or-secret-store'
+./scripts/dev_up.sh
+```
+
+Do not put the key in a `VITE_*` variable, frontend `.env` file, task payload, browser storage, log, or artifact. The worker uses `deepseek-v4-flash` through the configured server-side endpoint; no browser-side provider control exists.
+
+If translation fails during proofreading, use the safe failure code and stage log summary to recover:
+
+- `translation_proofread_missing_api_key`: add the key to the backend/worker environment, restart those processes, then retry `translation`.
+- `translation_proofread_auth_failed` (401): correct the backend/worker credential, then retry `translation`.
+- `translation_proofread_billing_failed` (402): resolve the provider account or billing issue, then retry `translation`.
+- `translation_proofread_rate_limit`, `translation_proofread_timeout`, or `translation_proofread_transient_exhausted`: wait for the provider condition to clear, then retry `translation`; retries are bounded.
+- `translation_proofread_invalid_response`: retry `translation` after the provider is healthy. Malformed, reordered, timestamp-changing, or empty responses are rejected and never published as final subtitles.
+
+A failed proofread never silently falls back to the preproofread diagnostic subtitles. Highlighting, reports, and export consume only validated final bilingual artifacts.
 
 ## Verification commands
 

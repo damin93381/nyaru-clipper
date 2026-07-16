@@ -14,7 +14,7 @@ const taskOverview = {
   ],
   created_at: "2026-07-12T03:00:00Z",
   current_stage: "asr",
-  execution_progress: { current_phase: "align", heartbeat_at: "2026-07-12T03:03:00Z", latest_message: "正在校准字幕时间轴", phase_count: 5, phase_index: 4, phase_started_at: "2026-07-12T03:02:00Z", phases: [], stage_name: "asr" },
+  execution_progress: { current_phase: "chunk", heartbeat_at: "2026-07-12T03:03:00Z", latest_message: "ASR 2/5", phase_count: 5, phase_index: 2, phase_started_at: "2026-07-12T03:02:00Z", phases: [], stage_name: "asr" },
   pipeline_run_id: "run-e2e",
   progress_percent: 58,
   recovery_actions: [],
@@ -51,7 +51,7 @@ test("renders the task overview and selected-stage inspector in production Chrom
   await page.goto(`${process.env.WORKSTATION_E2E_BASE_URL ?? ""}/workstation/tasks/task-e2e-overview`);
 
   await expect(page.getByRole("heading", { name: "工作站任务概览验证" })).toBeVisible();
-  await expect(page.getByText("校准字幕时间轴 · 4 / 5")).toBeVisible();
+  await expect(page.locator(".ny-overview__progress-label")).toHaveText("ASR 2/5");
   await expect(page.getByRole("button", { name: /语音转写/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("complementary", { name: "上下文检查器" }).getByText("已写入可公开的转写进度摘要")).toBeVisible();
   const sourceSubtitle = page.getByText("你好，欢迎来到单用户剪辑工作站。");

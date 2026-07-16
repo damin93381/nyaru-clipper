@@ -84,13 +84,16 @@ describe("NewTaskDrawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "检查来源" }));
     expect(await screen.findByText("夏日档案直播")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "继续设置" }));
+    const highlightFiltering = await screen.findByRole("checkbox", { name: "启用自动高光筛选" });
+    expect(highlightFiltering).not.toBeChecked();
+    fireEvent.click(highlightFiltering);
     fireEvent.change(screen.getByRole("spinbutton", { name: "优先级" }), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
 
     // Then: the exact inspected URL and options create one task, shared views refresh, and the task workspace opens.
     await waitFor(() => expect(screen.getByLabelText("当前位置")).toHaveTextContent("/workstation/tasks/task-created"));
     expect(requests.find((item) => item.url.pathname === "/api/v2/tasks")).toMatchObject({
-      body: { source: { kind: "bilibili", url: "https://www.bilibili.com/video/BV1drawertest" }, profile_id: "standard", priority: 7 },
+      body: { source: { kind: "bilibili", url: "https://www.bilibili.com/video/BV1drawertest" }, profile_id: "standard", priority: 7, highlight_filtering_enabled: true },
       method: "POST",
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: workstationKeys.summary });
@@ -124,7 +127,7 @@ describe("NewTaskDrawer", () => {
     // Then: no host path enters the UI or payload; the v2 request explicitly asks for a copy.
     await waitFor(() => expect(screen.getByLabelText("当前位置")).toHaveTextContent("/workstation/tasks/task-copy"));
     expect(requests.find((item) => item.url.pathname === "/api/v2/tasks")).toMatchObject({
-      body: { source: { kind: "local", root_id: "root-media", relative_path: "vod/summer.mp4", import_mode: "copy" }, profile_id: "standard", priority: 0 },
+      body: { source: { kind: "local", root_id: "root-media", relative_path: "vod/summer.mp4", import_mode: "copy" }, profile_id: "standard", priority: 0, highlight_filtering_enabled: false },
     });
     expect(screen.queryByText(/\/tmp|trusted-media/)).not.toBeInTheDocument();
   });

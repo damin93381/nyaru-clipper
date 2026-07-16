@@ -87,6 +87,7 @@ def _create_task_table() -> None:
         sa.Column("title", sa.String(), nullable=True),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("storage_bytes", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("highlight_filtering_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -106,6 +107,11 @@ def _add_task_columns(bind) -> None:
         op.add_column(
             "task",
             sa.Column("storage_bytes", sa.Integer(), nullable=False, server_default="0"),
+        )
+    if "highlight_filtering_enabled" not in task_columns:
+        op.add_column(
+            "task",
+            sa.Column("highlight_filtering_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         )
 
 

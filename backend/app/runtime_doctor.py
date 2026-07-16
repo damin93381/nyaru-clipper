@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from app.services.runtime_diagnostics import derive_runtime_diagnostics
 from app.services.runtime_profile import detect_runtime_profile
+from app.settings import get_settings
 
 _REQUIRED_IMPORTS: dict[str, str] = {
     "torch": "torch",
@@ -18,6 +19,7 @@ _REMEDIATION_BY_ISSUE_CODE: dict[str, str] = {
     "cpu_only_torch_on_wsl": "Install the dedicated WSL ROCm backend environment with ./scripts/install_backend_wsl_rocm.sh.",
     "hip_build_no_device": "Verify the WSL ROCm stack can expose the AMD GPU to torch.cuda before rerunning this doctor.",
 }
+_CTRANSLATE2_REMEDIATION = "Rebuild the WSL ASR backend with ./scripts/install_backend_wsl_rocm.sh."
 
 
 def _import_module(module_name: str):
@@ -50,6 +52,36 @@ def _check_runtime_imports() -> tuple[list[str], list[str]]:
         lines.append(f"import:{label}=ok version={version or 'unknown'}")
 
     return lines, failures
+
+
+def _check_ctranslate2_gpu() -> tuple[list[str], list[str]]:
+    try:
+        ctranslate2 = _import_module("ctranslate2")
+    except ModuleNotFoundError:
+        return ["ctranslate2=missing"], [_import_failure_message(module_name="ctranslate2")]
+    except (ImportError, OSError) as error:
+        return [f"ctranslate2=failed error={error}"], [_import_failure_message(module_name="ctranslate2", error=error)]
+
+    try:
+        device_count = ctranslate2.get_cuda_device_count()
+        compute_types = sorted(ctranslate2.get_supported_compute_types("cuda"))
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+        return [f"ctranslate2=failed error={error}"], [f"CTranslate2 cannot use the ROCm GPU: {error}. {_CTRANSLATE2_REMEDIATION}"]
+
+    lines = [
+        f"ctranslate2.version={getattr(ctranslate2, '__version__', 'unknown')}",
+        f"ctranslate2.cuda_device_count={device_count}",
+        f"ctranslate2.cuda_compute_types={compute_types}",
+    ]
+    if device_count < 1:
+        return lines, [f"CTranslate2 HIP build cannot see a GPU. {_CTRANSLATE2_REMEDIATION}"]
+    configured_compute_type = get_settings().whisperx_compute_type
+    if configured_compute_type not in compute_types:
+        return lines, [
+            "CTranslate2 does not support the configured ASR compute type "
+            f"'{configured_compute_type}' on the ROCm GPU. {_CTRANSLATE2_REMEDIATION}"
+        ]
+    return lines, []
 
 
 def _build_report_lines(runtime_profile: dict[str, object]) -> list[str]:
@@ -126,6 +158,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     runtime_profile = detect_runtime_profile()
     issues, _, _ = derive_runtime_diagnostics(runtime_profile)
     import_lines, import_failures = _check_runtime_imports()
+    ctranslate2_lines, ctranslate2_failures = _check_ctranslate2_gpu()
 
     for line in _build_report_lines(runtime_profile):
         print(line)
@@ -136,8 +169,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     for line in import_lines:
         print(line)
+    for line in ctranslate2_lines:
+        print(line)
 
-    failures = _doctor_failures(runtime_profile, issues=issues, import_failures=import_failures)
+    failures = _doctor_failures(runtime_profile, issues=issues, import_failures=[*import_failures, *ctranslate2_failures])
     if failures:
         for failure in failures:
             print(f"ERROR: {failure}", file=sys.stderr)

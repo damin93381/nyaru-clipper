@@ -9,4 +9,5 @@ require_commands uv
 setup_backend_dev_env
 require_backend_python
 
+cd "${BACKEND_DIR}"
 exec "${BACKEND_PYTHON_PATH}" -c "from app.worker import worker_loop; worker_loop()"

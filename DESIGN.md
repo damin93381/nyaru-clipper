@@ -82,6 +82,13 @@ The first delivery supports desktop widths from 1280 px. Product screens are not
 - **States:** default, hover-capable, focus-visible, disabled, validation failure.
 - **Accessibility:** explicit programmatic label and `aria-describedby` for support/error text; minimum 44 px target.
 
+### Processing option checkbox
+
+- **Structure:** a native checkbox inside the existing task-creation field stack, with a visible label and one concise consequence statement.
+- **States:** unchecked by default, checked on explicit operator choice, hover-capable, and focus-visible.
+- **Visual treatment:** the control uses the existing ivory surface, warm-grey rule, vermilion checked state, and `--ny-focus` focus outline; no new color, radius, or spacing token is introduced.
+- **Accessibility:** the label names the operation, the helper explains that candidate generation is optional, and the checked state is available through the native control semantics.
+
 ### Status stamp and source badge
 
 - **Structure:** text label plus Lucide status icon; status stamp can carry `running`, `success`, `warning`, or `failed` semantics.
@@ -125,7 +132,7 @@ The first delivery supports desktop widths from 1280 px. Product screens are not
 
 ### Inspected task creation flow
 
-- **Structure:** the global Radix drawer opens from the main command bar and advances source selection → verified source preview → Standard profile and priority. Bilibili creation requires a metadata inspection; local selection is limited to opaque trusted-root IDs and relative catalog paths.
+- **Structure:** the global Radix drawer opens from the main command bar and advances source selection → verified source preview → Standard profile, automatic-highlight option, and priority. The automatic-highlights checkbox is unchecked for a new task. Bilibili creation requires a metadata inspection; local selection is limited to opaque trusted-root IDs and relative catalog paths.
 - **States:** unselected, source validation failure, inspection loading/preview, local reference or task-owned copy, field-mapped server error, submitting, and dirty-close confirmation.
 - **Accessibility:** source choices are labelled buttons, catalog entries remain keyboard-operable, import modes use a radio relationship, and server errors remain next to their inputs while the operator's values stay intact.
 

@@ -146,6 +146,7 @@ def get_workstation_task_overview(session: Session, task_id: str) -> TaskOvervie
     item = _task_list_item(task, source, tags, legacy_stages, execution_progress)
     return TaskOverview(
         **item.model_dump(),
+        highlight_filtering_enabled=task.highlight_filtering_enabled,
         pipeline_run_id=pipeline_run.id if pipeline_run is not None else None,
         stages=stage_records,
         execution_progress=_execution_progress(execution_progress),
@@ -223,7 +224,13 @@ def _readiness_condition(readiness: str) -> object:
         select(TaskStage.id)
         .where(TaskStage.task_id == Task.id)
         .where(TaskStage.name.in_(expected_stage_names))
-        .where(TaskStage.status.not_in(("success", "failed")))
+        .where(TaskStage.status.not_in(("success", "failed", "skipped")))
+    )
+    skipped_highlight_stage = exists(
+        select(TaskStage.id)
+        .where(TaskStage.task_id == Task.id)
+        .where(TaskStage.name == "highlight")
+        .where(TaskStage.status == "skipped")
     )
     match readiness:
         case "ready":
@@ -234,6 +241,8 @@ def _readiness_condition(readiness: str) -> object:
             return failed_stage
         case "not_ready":
             return not_ready_stage
+        case "not_applicable":
+            return skipped_highlight_stage
         case unreachable:
             assert_never(unreachable)
 
@@ -469,6 +478,8 @@ def _artifact_readiness(stages: Sequence[TaskStageOverview], artifacts: Sequence
         artifact_id = artifact.id if artifact is not None else None
         if artifact is not None and Path(artifact.path).exists():
             status = "ready"
+        elif stage.name == "highlight" and stage.status == "skipped":
+            status = "not_applicable"
         elif stage.status == "failed":
             status = "failed"
         elif stage.status == "success":

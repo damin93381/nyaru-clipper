@@ -60,6 +60,7 @@ export interface TaskRecoveryAction {
 export type ArtifactReadinessStatus =
 	| "ready"
 	| "not_ready"
+	| "not_applicable"
 	| "missing"
 	| "failed";
 
