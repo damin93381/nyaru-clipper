@@ -1,8 +1,0 @@
-- 2026-04-25: Host environment did not have `uv`; installed a workspace-local copy under `.local/` and used it for all backend verification.
-- 2026-04-25: Host environment did not have Docker CLI/Compose; installed a workspace-local CLI shim under `.tools/` + `.docker/` and ignored those paths in Git so `docker compose ... config` could be verified without changing system tooling.
-- 2026-04-25: YAML language server was not installed locally, so Compose validation relied on `docker compose config` instead of LSP diagnostics.
-- 2026-04-25: Initial local `uv` installation was present only at `.local/uv`, not in a PATH-ready directory; this caused parent verification mismatch until a `.bin/uv` shim was added.
-- 2026-04-25: Required Task 2 verification initially failed because the host session could not create `/data`; runtime defaults were adjusted to keep `/data` for containerized runs while falling back to the repo-local `data/` directory for direct local verification.
-- 2026-04-25: Port 8000 had a stale `uvicorn app.main:app` process during Task 2 verification; the health curl only passed after killing the stale process and restarting the current app build.
-- 2026-04-25: Final UI QA in this host could not use the Playwright browser MCP because it requires a Chrome binary at `/opt/google/chrome/chrome`; CLI Playwright tests still ran successfully, so this is an environment/browser-tooling limitation rather than a repo defect.
-- 2026-04-25: Compose-backed release QA remained blocked in the final gate because this host session has no `docker` CLI available (`docker compose ps` -> `/bin/bash: docker: command not found`); treat Docker access as an environment limitation, not an application failure.
